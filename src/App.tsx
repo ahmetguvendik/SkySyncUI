@@ -1,7 +1,14 @@
 import React, { useEffect, useState } from 'react'
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { fetchWithAuth } from './api/client'
+import { useAuth } from './context/AuthContext'
+import Login from './pages/Login'
+import Register from './pages/Register'
 import './App.css'
 
-function App() {
+function Dashboard() {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
   const [flightNumber, setFlightNumber] = useState('')
   const [departure, setDeparture] = useState('')
   const [destination, setDestination] = useState('')
@@ -126,11 +133,9 @@ function App() {
         status: 0,
       }
 
-      const res = await fetch('http://localhost:5000/api/flight', {
+      const res = await fetchWithAuth('flight', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
 
@@ -167,7 +172,7 @@ function App() {
     try {
       setFlightsLoading(true)
       setFlightsError(null)
-      const res = await fetch('http://localhost:5000/api/Flight')
+      const res = await fetchWithAuth('Flight')
       const text = await res.text()
 
       if (!res.ok) {
@@ -206,7 +211,7 @@ function App() {
       setReservationError(null)
       setReservationSuccess(null)
 
-      const res = await fetch(`http://localhost:5000/api/Flight/${flightId}/seats`)
+      const res = await fetchWithAuth(`Flight/${flightId}/seats`)
       const text = await res.text()
 
       if (!res.ok) {
@@ -259,11 +264,9 @@ function App() {
         passengerEmail: reservationEmail,
       }
 
-      const res = await fetch('http://localhost:5000/api/Reservation', {
+      const res = await fetchWithAuth('Reservation', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
 
@@ -309,7 +312,23 @@ function App() {
                 Uçuşları görüntüleyin, koltuk seçin ve rezervasyon oluşturun.
               </p>
             </div>
-            <nav className="view-toggle">
+            <div className="app-header-right">
+              {user && (
+                <span className="app-user">
+                  {user.firstName} {user.lastName}
+                </span>
+              )}
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  logout()
+                  navigate('/login')
+                }}
+              >
+                Çıkış
+              </button>
+              <nav className="view-toggle">
               <button
                 type="button"
                 className={
@@ -333,6 +352,7 @@ function App() {
                 Uçuş Ekle
               </button>
             </nav>
+            </div>
           </div>
         </header>
 
@@ -788,6 +808,19 @@ function App() {
         )}
       </main>
     </div>
+  )
+}
+
+function App() {
+  const { token, isReady } = useAuth()
+  if (!isReady) return null
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/" element={token ? <Dashboard /> : <Navigate to="/login" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 

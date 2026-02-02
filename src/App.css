@@ -70,6 +70,17 @@ body {
   gap: 1.5rem;
 }
 
+.app-header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.app-user {
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
 .app-title {
   margin: 0;
   font-size: 1.8rem;
@@ -414,13 +425,18 @@ body {
   border-bottom: 1px solid #1e293b;
 }
 
-.secondary-button {
+.secondary-button,
+.ghost-button {
   background: #334155;
   border: 1px solid #475569;
   color: white;
   padding: 4px 12px;
   border-radius: 999px;
   cursor: pointer;
+}
+
+.ghost-button:hover {
+  background: #475569;
 }
 
 .reservation-card {
