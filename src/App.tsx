@@ -64,7 +64,28 @@ function Dashboard() {
     reservationId?: string
     message?: string
   } | null>(null)
-  const [activeView, setActiveView] = useState<'list' | 'create'>('list')
+  const [activeView, setActiveView] = useState<'list' | 'create' | 'reservations'>('list')
+
+  const [reservations, setReservations] = useState<
+    {
+      id?: string
+      flightId?: string
+      flightNumber?: string
+      departure?: string
+      arrival?: string
+      seatNumber?: string
+      price?: number
+      status?: string
+      passengerName?: string
+      passengerSurname?: string
+      passengerEmail?: string
+      createdTime?: string
+      departureTime?: string
+      [key: string]: unknown
+    }[]
+  >([])
+  const [reservationsLoading, setReservationsLoading] = useState(false)
+  const [reservationsError, setReservationsError] = useState<string | null>(null)
 
   const toggleSeatSelection = (seatId: string, isReserved: boolean) => {
     if (isReserved || !selectedFlightSeats) return
@@ -296,9 +317,44 @@ function Dashboard() {
     }
   }
 
+  const fetchReservations = React.useCallback(async () => {
+    if (!user?.email) return
+    try {
+      setReservationsLoading(true)
+      setReservationsError(null)
+      const emailEncoded = encodeURIComponent(user.email)
+      const res = await fetchWithAuth(`Reservation/passenger/${emailEncoded}`)
+      const text = await res.text()
+      if (!res.ok) {
+        throw new Error(text || 'Rezervasyonlar alınırken bir hata oluştu.')
+      }
+      if (!text) {
+        setReservations([])
+        return
+      }
+      let data: { reservations?: typeof reservations } | typeof reservations
+      try {
+        data = JSON.parse(text)
+      } catch {
+        throw new Error('Rezervasyonlar için beklenmeyen yanıt formatı.')
+      }
+      const list = Array.isArray(data) ? data : (data?.reservations ?? [])
+      setReservations(Array.isArray(list) ? list : [])
+    } catch (err) {
+      setReservationsError(err instanceof Error ? err.message : 'Rezervasyonlar yüklenemedi.')
+      setReservations([])
+    } finally {
+      setReservationsLoading(false)
+    }
+  }, [user?.email])
+
   useEffect(() => {
     fetchFlights()
   }, [])
+
+  useEffect(() => {
+    if (activeView === 'reservations' && user?.email) fetchReservations()
+  }, [activeView, user?.email, fetchReservations])
 
   return (
     <div className="app-root">
@@ -350,6 +406,17 @@ function Dashboard() {
                 onClick={() => setActiveView('create')}
               >
                 Uçuş Ekle
+              </button>
+              <button
+                type="button"
+                className={
+                  activeView === 'reservations'
+                    ? 'view-toggle-button view-toggle-button-active'
+                    : 'view-toggle-button'
+                }
+                onClick={() => setActiveView('reservations')}
+              >
+                Rezervasyonlarım
               </button>
             </nav>
             </div>
@@ -454,6 +521,102 @@ function Dashboard() {
               </div>
             )}
 
+          </section>
+        )}
+
+        {activeView === 'reservations' && (
+          <section className="card card-secondary">
+            <div className="section-header">
+              <h2 className="section-title">Rezervasyonlarım</h2>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={fetchReservations}
+                disabled={reservationsLoading}
+              >
+                {reservationsLoading ? 'Yenileniyor...' : 'Yenile'}
+              </button>
+            </div>
+            <p className="muted-text" style={{ marginBottom: '1rem' }}>
+              E-posta: <span className="mono">{user?.email}</span>
+            </p>
+            {reservationsError && (
+              <div className="alert alert-error">{reservationsError}</div>
+            )}
+            {reservationsLoading && reservations.length === 0 && (
+              <p className="muted-text">Rezervasyonlar yükleniyor...</p>
+            )}
+            {!reservationsLoading && reservations.length === 0 && !reservationsError && (
+              <p className="muted-text">Henüz rezervasyonunuz bulunmuyor.</p>
+            )}
+            {reservations.length > 0 && (
+              <div className="reservations-table-wrapper">
+                <table className="flights-table reservations-table">
+                  <thead>
+                    <tr>
+                      <th>Uçuş</th>
+                      <th>Rota</th>
+                      <th>Koltuk</th>
+                      <th>Yolcu</th>
+                      <th>Durum</th>
+                      <th>Kalkış</th>
+                      <th>Ücret</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reservations.map((r, idx) => (
+                      <tr key={r.id ?? r.flightId ?? idx} className="flight-row">
+                        <td>
+                          <span className="mono">{r.flightNumber ?? '—'}</span>
+                        </td>
+                        <td>
+                          <div className="route">
+                            <span>{r.departure ?? '—'}</span>
+                            <span className="route-arrow">→</span>
+                            <span>{r.arrival ?? '—'}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="mono">{r.seatNumber ?? '—'}</span>
+                        </td>
+                        <td>
+                          {[r.passengerName, r.passengerSurname].filter(Boolean).join(' ') || r.passengerEmail || '—'}
+                        </td>
+                        <td>
+                          <span className="reservation-status">{r.status ?? '—'}</span>
+                        </td>
+                        <td>
+                          {r.departureTime ? (
+                            <div className="datetime">
+                              <span>
+                                {new Date(r.departureTime).toLocaleDateString('tr-TR')}{' '}
+                              </span>
+                              <span className="datetime-secondary">
+                                {new Date(r.departureTime).toLocaleTimeString('tr-TR', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </span>
+                            </div>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {typeof r.price === 'number' ? (
+                            <span className="mono">
+                              ₺{r.price.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         )}
 

@@ -406,7 +406,8 @@ body {
 .alert-success { background: rgba(22, 163, 74, 0.16); color: #bbf7d0; border: 1px solid #16a34a; }
 .alert-error { background: rgba(239, 68, 68, 0.12); color: #fecaca; border: 1px solid #ef4444; }
 
-.flights-table-wrapper {
+.flights-table-wrapper,
+.reservations-table-wrapper {
   margin-top: 1rem;
   border-radius: 0.9rem;
   overflow: hidden;
@@ -437,6 +438,11 @@ body {
 
 .ghost-button:hover {
   background: #475569;
+}
+
+.reservation-status {
+  font-size: 0.85rem;
+  color: #94a3b8;
 }
 
 .reservation-card {
