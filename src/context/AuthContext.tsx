@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { AuthUser, AuthResponse } from '../api/client'
-import { clearAuth, setAuth, getToken } from '../api/client'
+import { clearAuth, setAuth, getToken, getErrorMessageFromResponse } from '../api/client'
 
 const AUTH_USER_KEY = 'skysync_user'
 
@@ -56,7 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Sunucudan beklenmeyen yanıt alındı.')
       }
     }
-    if (!res.ok) throw new Error((data as { message?: string })?.message || 'Giriş başarısız.')
+    if (!res.ok) throw new Error(getErrorMessageFromResponse(data, 'Giriş başarısız.'))
     if (!data?.token || !data?.user) throw new Error('Eksik giriş yanıtı.')
     setAuth(data.token, data.user)
     setState({ token: data.token, user: data.user, isReady: true })
@@ -84,7 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           throw new Error('Sunucudan beklenmeyen yanıt alındı.')
         }
       }
-      if (!res.ok) throw new Error((data as { message?: string })?.message || 'Kayıt başarısız.')
+      if (!res.ok) throw new Error(getErrorMessageFromResponse(data, 'Kayıt başarısız.'))
       if (!data?.token || !data?.user) throw new Error('Eksik kayıt yanıtı.')
       setAuth(data.token, data.user)
       setState({ token: data.token, user: data.user, isReady: true })

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
-import { fetchWithAuth } from './api/client'
+import { fetchWithAuth, getErrorMessageFromResponse } from './api/client'
 import { useAuth } from './context/AuthContext'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -15,9 +15,14 @@ function Dashboard() {
   const [departureTime, setDepartureTime] = useState('')
   const [arrivalTime, setArrivalTime] = useState('')
   const [basePrice, setBasePrice] = useState<number | ''>('')
+  const [aircraftId, setAircraftId] = useState('')
   const [loading, setLoading] = useState(false)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const [aircrafts, setAircrafts] = useState<{ id: string; model?: string; name?: string; seatCount?: number; [key: string]: unknown }[]>([])
+  const [aircraftsLoading, setAircraftsLoading] = useState(false)
+  const [aircraftsError, setAircraftsError] = useState<string | null>(null)
 
   const [flights, setFlights] = useState<
     {
@@ -136,8 +141,8 @@ function Dashboard() {
     setSuccessMessage(null)
     setErrorMessage(null)
 
-    if (!flightNumber || !departure || !destination || !departureTime || !arrivalTime || basePrice === '') {
-      setErrorMessage('Lütfen tüm alanları doldurun.')
+    if (!aircraftId || !flightNumber || !departure || !destination || !departureTime || !arrivalTime || basePrice === '') {
+      setErrorMessage('Lütfen tüm alanları (uçak dahil) doldurun.')
       return
     }
 
@@ -145,13 +150,14 @@ function Dashboard() {
       setLoading(true)
 
       const payload = {
+        aircraftId,
         flightNumber,
         departure,
         destination,
         departureTime: new Date(departureTime).toISOString(),
         arrivalTime: new Date(arrivalTime).toISOString(),
         basePrice: Number(basePrice),
-        status: 0,
+        status: 1,
       }
 
       const res = await fetchWithAuth('flight', {
@@ -171,10 +177,11 @@ function Dashboard() {
       }
 
       if (!res.ok || !data?.isSuccess) {
-        throw new Error(data?.message || 'Uçuş oluşturulurken bir hata oluştu.')
+        throw new Error(getErrorMessageFromResponse(data, 'Uçuş oluşturulurken bir hata oluştu.'))
       }
 
       setSuccessMessage(`Uçuş başarıyla oluşturuldu. Flight ID: ${data.flightId}`)
+      setAircraftId('')
       setFlightNumber('')
       setDeparture('')
       setDestination('')
@@ -196,20 +203,22 @@ function Dashboard() {
       const res = await fetchWithAuth('Flight')
       const text = await res.text()
 
+      let data: any = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          if (!res.ok) throw new Error(text)
+        }
+      }
+
       if (!res.ok) {
-        throw new Error('Uçuşlar alınırken bir hata oluştu.')
+        throw new Error(getErrorMessageFromResponse(data, 'Uçuşlar alınırken bir hata oluştu.'))
       }
 
       if (!text) {
         setFlights([])
         return
-      }
-
-      let data: any
-      try {
-        data = JSON.parse(text)
-      } catch {
-        throw new Error('Uçuşlar için beklenmeyen yanıt formatı alındı.')
       }
 
       setFlights(data?.flights ?? [])
@@ -235,19 +244,21 @@ function Dashboard() {
       const res = await fetchWithAuth(`Flight/${flightId}/seats`)
       const text = await res.text()
 
+      let data: any = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          if (!res.ok) throw new Error(text)
+        }
+      }
+
       if (!res.ok) {
-        throw new Error('Koltuklar alınırken bir hata oluştu.')
+        throw new Error(getErrorMessageFromResponse(data, 'Koltuklar alınırken bir hata oluştu.'))
       }
 
       if (!text) {
         throw new Error('Bu uçuş için koltuk bilgisi bulunamadı.')
-      }
-
-      let data: any
-      try {
-        data = JSON.parse(text)
-      } catch {
-        throw new Error('Koltuklar için beklenmeyen yanıt formatı alındı.')
       }
 
       setSelectedFlightSeats(data)
@@ -302,7 +313,7 @@ function Dashboard() {
       }
 
       if (!res.ok || data?.isSuccess === false) {
-        throw new Error(data?.message || 'Rezervasyon oluşturulurken bir hata oluştu.')
+        throw new Error(getErrorMessageFromResponse(data, 'Rezervasyon oluşturulurken bir hata oluştu.'))
       }
 
       setReservationSuccess({
@@ -325,18 +336,20 @@ function Dashboard() {
       const emailEncoded = encodeURIComponent(user.email)
       const res = await fetchWithAuth(`Reservation/passenger/${emailEncoded}`)
       const text = await res.text()
+      let data: { reservations?: typeof reservations } | typeof reservations | null = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          if (!res.ok) throw new Error(text)
+        }
+      }
       if (!res.ok) {
-        throw new Error(text || 'Rezervasyonlar alınırken bir hata oluştu.')
+        throw new Error(getErrorMessageFromResponse(data as import('./api/client').ApiErrorBody | null, 'Rezervasyonlar alınırken bir hata oluştu.'))
       }
       if (!text) {
         setReservations([])
         return
-      }
-      let data: { reservations?: typeof reservations } | typeof reservations
-      try {
-        data = JSON.parse(text)
-      } catch {
-        throw new Error('Rezervasyonlar için beklenmeyen yanıt formatı.')
       }
       const list = Array.isArray(data) ? data : (data?.reservations ?? [])
       setReservations(Array.isArray(list) ? list : [])
@@ -348,9 +361,59 @@ function Dashboard() {
     }
   }, [user?.email])
 
+  const fetchAircrafts = React.useCallback(async () => {
+    try {
+      setAircraftsLoading(true)
+      setAircraftsError(null)
+      let res = await fetchWithAuth('flight/aircrafts')
+      let text = await res.text()
+      if (!res.ok) {
+        res = await fetchWithAuth('Flight/aircrafts')
+        text = await res.text()
+      }
+      let data: unknown = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          if (!res.ok) throw new Error(text)
+        }
+      }
+      if (!res.ok) throw new Error(getErrorMessageFromResponse(data as import('./api/client').ApiErrorBody | null, 'Uçak listesi alınamadı.'))
+      if (!text) {
+        setAircrafts([])
+        return
+      }
+      const obj = data as Record<string, unknown>
+      const rawList = Array.isArray(data)
+        ? data
+        : (obj?.aircraft ?? obj?.aircrafts ?? obj?.data ?? obj?.Aircraft ?? obj?.Aircrafts ?? obj?.Data ?? [])
+      const list = Array.isArray(rawList) ? rawList : []
+      const normalized = list.map((item: Record<string, unknown>) => {
+        const id = String(item.id ?? item.aircraftId ?? '')
+        const model = item.model ?? item.Model
+        const name = item.name ?? item.Name
+        const tailNumber = item.tailNumber ?? item.TailNumber
+        const seatCount = typeof item.seatCount === 'number' ? item.seatCount : typeof item.SeatCount === 'number' ? item.SeatCount : undefined
+        const label = [model, name, tailNumber, id].find((v) => v != null && v !== '')
+        return { id, model: String(label ?? id), name: label != null ? String(label) : undefined, seatCount }
+      })
+      setAircrafts(normalized.filter((a) => a.id))
+    } catch (err) {
+      setAircraftsError(err instanceof Error ? err.message : 'Uçak listesi yüklenemedi.')
+      setAircrafts([])
+    } finally {
+      setAircraftsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     fetchFlights()
   }, [])
+
+  useEffect(() => {
+    if (activeView === 'create') fetchAircrafts()
+  }, [activeView, fetchAircrafts])
 
   useEffect(() => {
     if (activeView === 'reservations' && user?.email) fetchReservations()
@@ -426,8 +489,28 @@ function Dashboard() {
         {activeView === 'create' && (
           <section className="card">
             <h2 className="section-title">Uçuş Ekle</h2>
+            {aircraftsError && <div className="alert alert-error">{aircraftsError}</div>}
             <form className="form-grid" onSubmit={handleSubmit}>
               <div className="form-row">
+                <div className="form-field">
+                  <label htmlFor="aircraft">Uçak</label>
+                  <select
+                    id="aircraft"
+                    value={aircraftId}
+                    onChange={(e) => setAircraftId(e.target.value)}
+                    disabled={aircraftsLoading}
+                  >
+                    <option value="">
+                      {aircraftsLoading ? 'Yükleniyor...' : 'Uçak seçin'}
+                    </option>
+                    {aircrafts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {(a.model ?? a.name ?? a.id) as string}
+                        {a.seatCount != null ? ` (${a.seatCount} koltuk)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="form-field">
                   <label htmlFor="flightNumber">Uçuş Numarası</label>
                   <input

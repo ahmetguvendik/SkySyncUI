@@ -44,4 +44,32 @@ export async function fetchWithAuth(path: string, options: RequestInit = {}): Pr
   return fetch(url, { ...options, headers })
 }
 
+/** API hata cevabı: message, isteğe bağlı code, validasyon için errors */
+export type ApiErrorBody = {
+  message?: string
+  code?: string
+  errors?: Array<{ propertyName?: string; errorMessage?: string }>
+}
+
+/**
+ * response.message ve isteğe bağlı response.code ile tutarlı hata metni üretir.
+ * Validasyon hatalarında errors[].errorMessage birleştirilir.
+ */
+export function getErrorMessageFromResponse(
+  data: ApiErrorBody | null,
+  fallback: string
+): string {
+  if (!data) return fallback
+  let msg = data.message ?? fallback
+  if (Array.isArray(data.errors) && data.errors.length > 0) {
+    const details = data.errors
+      .map((e) => e.errorMessage ?? e.propertyName)
+      .filter(Boolean)
+      .join(' ')
+    if (details) msg = `${msg} ${details}`.trim()
+  }
+  if (data.code) msg = `${msg} [${data.code}]`
+  return msg
+}
+
 export { API_BASE, getStoredToken as getToken }
