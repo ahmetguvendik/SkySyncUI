@@ -7,6 +7,14 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
-    allowedHosts: true
-  }
+    allowedHosts: true,
+    // OTLP trace'leri aynı origin üzerinden gönder (CORS olmadan Jaeger'a ulaşsın)
+    proxy: {
+      '/otel': {
+        target: 'http://localhost:4318',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/otel/, ''),
+      },
+    },
+  },
 })
