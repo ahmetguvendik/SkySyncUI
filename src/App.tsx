@@ -200,7 +200,7 @@ function Dashboard() {
     try {
       setFlightsLoading(true)
       setFlightsError(null)
-      const res = await fetchWithAuth('Flight')
+      const res = await fetchWithAuth('flight')
       const text = await res.text()
 
       let data: any = null
@@ -241,7 +241,7 @@ function Dashboard() {
       setReservationError(null)
       setReservationSuccess(null)
 
-      const res = await fetchWithAuth(`Flight/${flightId}/seats`)
+      const res = await fetchWithAuth(`flight/${flightId}/seats`)
       const text = await res.text()
 
       let data: any = null
@@ -296,7 +296,7 @@ function Dashboard() {
         passengerEmail: reservationEmail,
       }
 
-      const res = await fetchWithAuth('Reservation', {
+      const res = await fetchWithAuth('reservation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -334,7 +334,7 @@ function Dashboard() {
       setReservationsLoading(true)
       setReservationsError(null)
       const emailEncoded = encodeURIComponent(user.email)
-      const res = await fetchWithAuth(`Reservation/passenger/${emailEncoded}`)
+      const res = await fetchWithAuth(`reservation/passenger/${emailEncoded}`)
       const text = await res.text()
       let data: { reservations?: typeof reservations } | typeof reservations | null = null
       if (text) {
@@ -368,7 +368,7 @@ function Dashboard() {
       let res = await fetchWithAuth('flight/aircrafts')
       let text = await res.text()
       if (!res.ok) {
-        res = await fetchWithAuth('Flight/aircrafts')
+        res = await fetchWithAuth('flight/aircrafts')
         text = await res.text()
       }
       let data: unknown = null
