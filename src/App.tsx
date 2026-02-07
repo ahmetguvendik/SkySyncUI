@@ -6,6 +6,10 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import './App.css'
 
+// React Strict Mode (dev) effect'i iki kez çalıştırır; aynı isteğin iki kez gitmesini önlemek için kısa süreli dedupe
+let lastFlightListFetchStart = 0
+const FLIGHT_LIST_FETCH_DEBOUNCE_MS = 2000
+
 function Dashboard() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -408,6 +412,9 @@ function Dashboard() {
   }, [])
 
   useEffect(() => {
+    const now = Date.now()
+    if (now - lastFlightListFetchStart < FLIGHT_LIST_FETCH_DEBOUNCE_MS) return
+    lastFlightListFetchStart = now
     fetchFlights()
   }, [])
 

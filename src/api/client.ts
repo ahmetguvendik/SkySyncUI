@@ -14,18 +14,30 @@ export type AuthResponse = {
   user: AuthUser
 }
 
+const USER_STORAGE_KEY = 'skysync_user'
+
 function getStoredToken(): string | null {
   return localStorage.getItem('skysync_token')
 }
 
+function getStoredUser(): AuthUser | null {
+  try {
+    const raw = localStorage.getItem(USER_STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as AuthUser
+  } catch {
+    return null
+  }
+}
+
 export function setAuth(token: string, user: AuthUser): void {
   localStorage.setItem('skysync_token', token)
-  localStorage.setItem('skysync_user', JSON.stringify(user))
+  localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user))
 }
 
 export function clearAuth(): void {
   localStorage.removeItem('skysync_token')
-  localStorage.removeItem('skysync_user')
+  localStorage.removeItem(USER_STORAGE_KEY)
 }
 
 function buildUrl(path: string): string {
@@ -36,8 +48,12 @@ function buildUrl(path: string): string {
 export async function fetchWithAuth(path: string, options: RequestInit = {}): Promise<Response> {
   const url = path.startsWith('http') ? path : buildUrl(path)
   const token = getStoredToken()
+  const user = getStoredUser()
   const headers: Record<string, string> = { ...(options.headers as Record<string, string>) }
   if (token) headers['Authorization'] = `Bearer ${token}`
+  // UserLogContext: Gateway/backend JWT'den veya bu header'lardan UserId & UserEmail alır (LogContext, Seq)
+  if (user?.id) headers['X-User-Id'] = user.id
+  if (user?.email) headers['X-User-Email'] = user.email
   if (options.body != null && typeof options.body === 'string' && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'
   }
