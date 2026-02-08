@@ -9,6 +9,7 @@
  * Backend: Access-Control-Expose-Headers ile traceparent ve tracestate açık olmalı.
  */
 
+import { context, propagation, trace } from '@opentelemetry/api'
 import {
   BatchSpanProcessor,
   WebTracerProvider,
@@ -45,6 +46,35 @@ const provider = new WebTracerProvider({
 })
 
 provider.register()
+
+/**
+ * Mevcut aktif span'den W3C traceparent üretir.
+ * Rezervasyon cevabında traceparent header'ı yoksa (backend expose etmiyorsa),
+ * ödeme isteğinde aynı trace'e bağlanmak için kullanılır.
+ */
+export function getCurrentTraceparent(): string | null {
+  const span = trace.getActiveSpan()
+  if (!span) return null
+  const ctx = span.spanContext()
+  if (!ctx.traceId || !ctx.spanId) return null
+  const flags = (ctx.traceFlags ?? 1).toString(16).padStart(2, '0')
+  return `00-${ctx.traceId}-${ctx.spanId}-${flags}`
+}
+
+/**
+ * traceparent (ve isteğe bağlı tracestate) ile verilen trace context'inde fn çalıştırır.
+ * Böylece ödeme fetch'i aynı trace'e bağlanır (tek trace'te görünür).
+ */
+export function runWithTraceContext<T>(
+  traceparent: string,
+  tracestate: string | undefined,
+  fn: () => T
+): T {
+  const carrier: Record<string, string> = { traceparent }
+  if (tracestate) carrier.tracestate = tracestate
+  const ctx = propagation.extract(context.active(), carrier)
+  return context.with(ctx, fn)
+}
 
 function getStoredUser(): { id: string; email: string; firstName?: string; lastName?: string; role: string } | null {
   try {

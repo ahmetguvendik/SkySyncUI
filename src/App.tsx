@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { fetchWithAuth, getErrorMessageFromResponse } from './api/client'
+import { getCurrentTraceparent, runWithTraceContext } from './tracing'
 import { useAuth } from './context/AuthContext'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -67,10 +68,23 @@ function Dashboard() {
   const [reservationName, setReservationName] = useState('')
   const [reservationSurname, setReservationSurname] = useState('')
   const [reservationEmail, setReservationEmail] = useState('')
+  const [cardNumber, setCardNumber] = useState('')
+  const [cardExpiry, setCardExpiry] = useState('')
+  const [cardCvv, setCardCvv] = useState('')
+  const [cardholderName, setCardholderName] = useState('')
   const [reservationLoading, setReservationLoading] = useState(false)
+  const [paymentLoading, setPaymentLoading] = useState(false)
   const [reservationError, setReservationError] = useState<string | null>(null)
   const [reservationSuccess, setReservationSuccess] = useState<{
+    correlationId?: string
     reservationId?: string
+    message?: string
+    traceparent?: string
+    tracestate?: string
+  } | null>(null)
+  const [paymentComplete, setPaymentComplete] = useState(false)
+  const [paymentResult, setPaymentResult] = useState<{
+    transactionId?: string
     message?: string
   } | null>(null)
   const [activeView, setActiveView] = useState<'list' | 'create' | 'reservations'>('list')
@@ -289,7 +303,6 @@ function Dashboard() {
     try {
       setReservationLoading(true)
       setReservationError(null)
-      setReservationSuccess(null)
 
       const payload = {
         flightId: selectedFlightSeats.flightId,
@@ -306,6 +319,14 @@ function Dashboard() {
         body: JSON.stringify(payload),
       })
 
+      // Cevap gelir gelmez traceparent al (body okunmadan; aktif span hâlâ rezervasyon isteği)
+      let traceparent = res.headers.get('traceparent') ?? undefined
+      let tracestate = res.headers.get('tracestate') ?? undefined
+      if (!traceparent) {
+        const fromSpan = getCurrentTraceparent()
+        if (fromSpan) traceparent = fromSpan
+      }
+
       const text = await res.text()
       let data: any = null
       if (text) {
@@ -320,9 +341,16 @@ function Dashboard() {
         throw new Error(getErrorMessageFromResponse(data, 'Rezervasyon oluşturulurken bir hata oluştu.'))
       }
 
+      // Body'de traceparent dönüyorsa onu da kullan (backend bazen header yerine body'de verir)
+      const finalTraceparent = traceparent ?? data?.traceparent ?? undefined
+      const finalTracestate = tracestate ?? data?.tracestate ?? undefined
+
       setReservationSuccess({
+        correlationId: data?.correlationId,
         reservationId: data?.reservationId,
-        message: data?.message || 'Rezervasyon başarıyla oluşturuldu.',
+        message: data?.message || 'Rezervasyon oluşturuldu. Ödemeyi tamamlayın.',
+        traceparent: finalTraceparent,
+        tracestate: finalTracestate,
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Beklenmeyen bir hata oluştu.'
@@ -331,6 +359,123 @@ function Dashboard() {
       setReservationLoading(false)
     }
   }
+
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setReservationError(null)
+
+    if (!reservationSuccess?.reservationId || !reservationSuccess?.correlationId || !selectedFlightSeats || !activeSeatId) {
+      setReservationError(reservationSuccess?.reservationId && !reservationSuccess?.correlationId
+        ? 'Rezervasyon cevabında correlationId yok; ödeme yapılamıyor.'
+        : 'Rezervasyon bilgisi eksik.')
+      return
+    }
+
+    const activeSeat = selectedFlightSeats.seats.find((s) => s.id === activeSeatId)
+    if (!activeSeat) {
+      setReservationError('Koltuk bilgisi bulunamadı.')
+      return
+    }
+
+    const cardNumDigits = cardNumber.replace(/\s/g, '')
+    if (cardNumDigits.length !== 16 || !/^\d+$/.test(cardNumDigits)) {
+      setReservationError('Geçerli bir kart numarası girin (16 rakam).')
+      return
+    }
+    const [expMonth, expYear] = cardExpiry.split('/')
+    const month = parseInt(expMonth, 10)
+    const year = parseInt(expYear, 10)
+    const currentYear = new Date().getFullYear() % 100
+    const currentMonth = new Date().getMonth() + 1
+    if (
+      !expMonth ||
+      !expYear ||
+      month < 1 ||
+      month > 12 ||
+      year < currentYear ||
+      (year === currentYear && month < currentMonth)
+    ) {
+      setReservationError('Geçerli bir son kullanma tarihi girin (MM/YY).')
+      return
+    }
+    if (!/^\d{3,4}$/.test(cardCvv.trim())) {
+      setReservationError('CVV 3 veya 4 rakam olmalıdır.')
+      return
+    }
+    if (!cardholderName.trim()) {
+      setReservationError('Kart sahibi adını girin.')
+      return
+    }
+
+    try {
+      setPaymentLoading(true)
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+
+      const payload = {
+        correlationId: reservationSuccess.correlationId,
+        reservationId: reservationSuccess.reservationId,
+        amount: activeSeat.price,
+        expiresAt,
+        cardNumber: cardNumDigits,
+      }
+
+      const paymentHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (reservationSuccess.traceparent) paymentHeaders['traceparent'] = reservationSuccess.traceparent
+      if (reservationSuccess.tracestate) paymentHeaders['tracestate'] = reservationSuccess.tracestate
+
+      const doPaymentFetch = () =>
+        fetchWithAuth('payment/process', {
+          method: 'POST',
+          headers: paymentHeaders,
+          body: JSON.stringify(payload),
+        })
+
+      const res =
+        reservationSuccess.traceparent != null
+          ? await runWithTraceContext(
+              reservationSuccess.traceparent,
+              reservationSuccess.tracestate,
+              doPaymentFetch
+            )
+          : await doPaymentFetch()
+
+      const text = await res.text()
+      let data: { success?: boolean; transactionId?: string; message?: string; code?: string | null } | null = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!res.ok || data?.success !== true) {
+        throw new Error(data?.message ?? 'Ödeme işlenirken bir hata oluştu.')
+      }
+
+      setPaymentResult({
+        transactionId: data.transactionId,
+        message: data.message ?? 'Ödeme başarıyla tamamlandı.',
+      })
+      setPaymentComplete(true)
+      setCardNumber('')
+      setCardExpiry('')
+      setCardCvv('')
+      setCardholderName('')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Ödeme işlenirken bir hata oluştu.'
+      setReservationError(message)
+    } finally {
+      setPaymentLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!activeSeatId) return
+    setReservationSuccess(null)
+    setPaymentComplete(false)
+    setPaymentResult(null)
+  }, [activeSeatId])
 
   const fetchReservations = React.useCallback(async () => {
     if (!user?.email) return
@@ -950,107 +1095,192 @@ function Dashboard() {
               {activeSeatId && (
                 <div className="reservation-card">
                   <h3 className="section-title">Yolcu Bilgileri</h3>
-                  <form className="form-grid" onSubmit={handleReservationSubmit}>
-                    <div className="form-row">
-                      <div className="form-field">
-                        <label>Uçuş</label>
-                        <input
-                          type="text"
-                          value={selectedFlightSeats.flightNumber}
-                          disabled
-                        />
-                      </div>
-                      <div className="form-field">
-                        <label>Koltuk</label>
-                        <input
-                          type="text"
-                          value={
-                            selectedFlightSeats.seats.find((s) => s.id === activeSeatId)
-                              ?.seatNumber ?? ''
-                          }
-                          disabled
-                        />
-                      </div>
-                    </div>
 
-                    <div className="form-row">
-                      <div className="form-field">
-                        <label>Ad</label>
-                        <input
-                          type="text"
-                          placeholder="Örn. Ahmet"
-                          value={reservationName}
-                          onChange={(e) => setReservationName(e.target.value)}
-                        />
+                  {!reservationSuccess && (
+                    <form className="form-grid" onSubmit={handleReservationSubmit}>
+                      <div className="form-row">
+                        <div className="form-field">
+                          <label>Uçuş</label>
+                          <input
+                            type="text"
+                            value={selectedFlightSeats.flightNumber}
+                            disabled
+                          />
+                        </div>
+                        <div className="form-field">
+                          <label>Koltuk</label>
+                          <input
+                            type="text"
+                            value={
+                              selectedFlightSeats.seats.find((s) => s.id === activeSeatId)
+                                ?.seatNumber ?? ''
+                            }
+                            disabled
+                          />
+                        </div>
                       </div>
-                      <div className="form-field">
-                        <label>Soyad</label>
-                        <input
-                          type="text"
-                          placeholder="Örn. Yılmaz"
-                          value={reservationSurname}
-                          onChange={(e) => setReservationSurname(e.target.value)}
-                        />
+                      <div className="form-row">
+                        <div className="form-field">
+                          <label>Ad</label>
+                          <input
+                            type="text"
+                            placeholder="Örn. Ahmet"
+                            value={reservationName}
+                            onChange={(e) => setReservationName(e.target.value)}
+                          />
+                        </div>
+                        <div className="form-field">
+                          <label>Soyad</label>
+                          <input
+                            type="text"
+                            placeholder="Örn. Yılmaz"
+                            value={reservationSurname}
+                            onChange={(e) => setReservationSurname(e.target.value)}
+                          />
+                        </div>
                       </div>
-                    </div>
+                      <div className="form-row">
+                        <div className="form-field">
+                          <label>E-posta</label>
+                          <input
+                            type="email"
+                            placeholder="ornek@mail.com"
+                            value={reservationEmail}
+                            onChange={(e) => setReservationEmail(e.target.value)}
+                          />
+                        </div>
+                        <div className="form-field">
+                          <label>Ücret</label>
+                          <input
+                            type="text"
+                            disabled
+                            value={
+                              '₺' +
+                              (selectedFlightSeats.seats.find((s) => s.id === activeSeatId)
+                                ?.price ?? 0).toLocaleString('tr-TR', {
+                                maximumFractionDigits: 0,
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div className="form-actions">
+                        <button type="submit" disabled={reservationLoading}>
+                          {reservationLoading
+                            ? 'Rezervasyon Oluşturuluyor...'
+                            : 'Rezervasyonu Oluştur'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
 
-                    <div className="form-row">
-                      <div className="form-field">
-                        <label>E-posta</label>
-                        <input
-                          type="email"
-                          placeholder="ornek@mail.com"
-                          value={reservationEmail}
-                          onChange={(e) => setReservationEmail(e.target.value)}
-                        />
+                  {reservationSuccess && !paymentComplete && (
+                    <>
+                      <div className="reservation-created-banner">
+                        <span className="reservation-created-text">
+                          Rezervasyon oluşturuldu.
+                          {reservationSuccess.reservationId && (
+                            <> Rezervasyon no: <span className="mono">{reservationSuccess.reservationId}</span></>
+                          )}{' '}
+                          Ödemeye geçin.
+                        </span>
                       </div>
-                      <div className="form-field">
-                        <label>Ücret</label>
-                        <input
-                          type="text"
-                          disabled
-                          value={
-                            '₺' +
-                            (selectedFlightSeats.seats.find((s) => s.id === activeSeatId)
-                              ?.price ?? 0).toLocaleString('tr-TR', {
-                              maximumFractionDigits: 0,
-                            })
-                          }
-                        />
-                      </div>
-                    </div>
+                      <form className="form-grid" onSubmit={handlePaymentSubmit}>
+                        <div className="card-details-section">
+                          <h4 className="card-details-title">Kart Bilgileri</h4>
+                          <p className="card-details-hint">Ödeme demo amaçlıdır; kart bilgileriniz kaydedilmez.</p>
+                          <div className="form-row">
+                            <div className="form-field form-field-full">
+                              <label>Kart Numarası</label>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="cc-number"
+                                placeholder="1234 5678 9012 3456"
+                                maxLength={19}
+                                value={cardNumber}
+                                onChange={(e) => {
+                                  const v = e.target.value.replace(/\D/g, '').slice(0, 16)
+                                  setCardNumber(v.replace(/(\d{4})(?=\d)/g, '$1 ').trim())
+                                }}
+                              />
+                            </div>
+                          </div>
+                          <div className="form-row">
+                            <div className="form-field">
+                              <label>Son Kullanma Tarihi</label>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="cc-exp"
+                                placeholder="MM/YY"
+                                maxLength={5}
+                                value={cardExpiry}
+                                onChange={(e) => {
+                                  let v = e.target.value.replace(/\D/g, '')
+                                  if (v.length >= 2) v = v.slice(0, 2) + '/' + v.slice(2, 4)
+                                  setCardExpiry(v)
+                                }}
+                              />
+                            </div>
+                            <div className="form-field">
+                              <label>CVV</label>
+                              <input
+                                type="password"
+                                inputMode="numeric"
+                                autoComplete="cc-csc"
+                                placeholder="123"
+                                maxLength={4}
+                                value={cardCvv}
+                                onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, ''))}
+                              />
+                              <span className="form-field-hint">Kartın arkasındaki 3 veya 4 rakam</span>
+                            </div>
+                          </div>
+                          <div className="form-row">
+                            <div className="form-field form-field-full">
+                              <label>Kart Üzerindeki İsim</label>
+                              <input
+                                type="text"
+                                autoComplete="cc-name"
+                                placeholder="AD SOYAD"
+                                value={cardholderName}
+                                onChange={(e) => setCardholderName(e.target.value.toUpperCase())}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="form-actions">
+                          <button type="submit" disabled={paymentLoading}>
+                            {paymentLoading ? 'Ödeme işleniyor...' : 'Ödemeyi Tamamla'}
+                          </button>
+                        </div>
+                      </form>
+                    </>
+                  )}
 
-                    <div className="form-actions">
-                      <button type="submit" disabled={reservationLoading}>
-                        {reservationLoading
-                          ? 'Rezervasyon Oluşturuluyor...'
-                          : 'Rezervasyonu Oluştur ve Ödemeye Geç'}
-                      </button>
+                  {paymentComplete && reservationSuccess && (
+                    <div className="payment-panel">
+                      <div className="payment-title">Ödeme Tamamlandı</div>
+                      <div className="payment-text">
+                        {paymentResult?.message ?? reservationSuccess.message}
+                      </div>
+                      {reservationSuccess.reservationId && (
+                        <div className="payment-text">
+                          Rezervasyon no: <span className="mono">{reservationSuccess.reservationId}</span>
+                        </div>
+                      )}
+                      {paymentResult?.transactionId && (
+                        <div className="payment-text">
+                          İşlem no: <span className="mono">{paymentResult.transactionId}</span>
+                        </div>
+                      )}
                     </div>
-                  </form>
+                  )}
 
                   {reservationError && (
                     <div className="alert alert-error" style={{ marginTop: '0.75rem' }}>
                       {reservationError}
-                    </div>
-                  )}
-
-                  {reservationSuccess && (
-                    <div className="payment-panel">
-                      <div className="payment-title">Ödeme Sayfası</div>
-                      <div className="payment-text">
-                        {reservationSuccess.message}{' '}
-                        {reservationSuccess.reservationId && (
-                          <>
-                            Rezervasyon numarası:{' '}
-                            <span className="mono">{reservationSuccess.reservationId}</span>
-                          </>
-                        )}
-                      </div>
-                      <div className="payment-text small">
-                        Buraya gerçek ödeme ekranını (kredi kartı, 3D Secure vb.) entegre
-                        edebilirsiniz.
-                      </div>
                     </div>
                   )}
                 </div>
