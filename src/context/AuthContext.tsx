@@ -10,9 +10,21 @@ type AuthState = {
   isReady: boolean
 }
 
+/** Backend kayıt başarılı döndüğünde token/user vermeyebilir; sadece isSuccess, message, userId döner */
+export type RegisterSuccessResponse = {
+  isSuccess: true
+  message?: string
+  userId?: string
+}
+
 type AuthContextValue = AuthState & {
   login: (email: string, password: string) => Promise<AuthResponse>
-  register: (email: string, password: string, firstName: string, lastName: string) => Promise<AuthResponse>
+  register: (
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string
+  ) => Promise<AuthResponse | RegisterSuccessResponse>
   logout: () => void
 }
 
@@ -69,14 +81,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password: string,
       firstName: string,
       lastName: string
-    ): Promise<AuthResponse> => {
+    ): Promise<AuthResponse | RegisterSuccessResponse> => {
       const res = await fetch(`${API_BASE}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, firstName, lastName }),
       })
       const text = await res.text()
-      let data: AuthResponse & { message?: string } | null = null
+      let data: (AuthResponse & { isSuccess?: boolean; message?: string; userId?: string }) | null = null
       if (text) {
         try {
           data = JSON.parse(text)
@@ -85,10 +97,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (!res.ok) throw new Error(getErrorMessageFromResponse(data, 'Kayıt başarısız.'))
-      if (!data?.token || !data?.user) throw new Error('Eksik kayıt yanıtı.')
-      setAuth(data.token, data.user)
-      setState({ token: data.token, user: data.user, isReady: true })
-      return data
+      if (data?.isSuccess === false) throw new Error(getErrorMessageFromResponse(data, 'Kayıt başarısız.'))
+      // Backend bazen sadece isSuccess, message, userId döner; token/user yoksa oturum açmıyoruz
+      if (data?.token && data?.user) {
+        setAuth(data.token, data.user)
+        setState({ token: data.token, user: data.user, isReady: true })
+        return data
+      }
+      if (data?.isSuccess === true || data?.userId) {
+        return { isSuccess: true, message: data?.message, userId: data?.userId }
+      }
+      throw new Error(getErrorMessageFromResponse(data, 'Kayıt yanıtı işlenemedi.'))
     },
     []
   )

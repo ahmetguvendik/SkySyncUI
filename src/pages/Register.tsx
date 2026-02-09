@@ -26,8 +26,12 @@ export default function Register() {
     }
     try {
       setLoading(true)
-      await register(email.trim(), password, firstName.trim(), lastName.trim())
-      navigate('/', { replace: true })
+      const result = await register(email.trim(), password, firstName.trim(), lastName.trim())
+      if (result && 'token' in result && result.token) {
+        navigate('/', { replace: true })
+      } else {
+        navigate('/login', { replace: true, state: { message: (result as { message?: string })?.message || 'Kayıt başarılı. Giriş yapabilirsiniz.' } })
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Kayıt oluşturulamadı.')
     } finally {

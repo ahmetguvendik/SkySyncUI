@@ -1,14 +1,18 @@
 import React, { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import './Auth.css'
 
 export default function Login() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { token, login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(
+    (location.state as { message?: string } | null)?.message ?? null
+  )
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -67,6 +71,7 @@ export default function Login() {
                 autoComplete="current-password"
               />
             </div>
+            {successMessage && <div className="alert alert-success">{successMessage}</div>}
             {error && <div className="alert alert-error">{error}</div>}
             <div className="form-actions auth-actions">
               <button type="submit" disabled={loading}>
