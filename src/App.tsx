@@ -5,6 +5,8 @@ import { getCurrentTraceparent, runWithTraceContext } from './tracing'
 import { useAuth } from './context/AuthContext'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword from './pages/ResetPassword'
 import './App.css'
 
 // React Strict Mode (dev) effect'i iki kez çalıştırır; aynı isteğin iki kez gitmesini önlemek için kısa süreli dedupe
@@ -1301,6 +1303,8 @@ function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/" element={token ? <Dashboard /> : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

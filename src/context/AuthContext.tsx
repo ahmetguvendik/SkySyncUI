@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import type { AuthUser, AuthResponse } from '../api/client'
+import type { AuthUser, AuthResponse, ApiErrorBody } from '../api/client'
 import { API_BASE, clearAuth, setAuth, getToken, getErrorMessageFromResponse } from '../api/client'
 
 const AUTH_USER_KEY = 'skysync_user'
@@ -26,6 +26,13 @@ type AuthContextValue = AuthState & {
     lastName: string
   ) => Promise<AuthResponse | RegisterSuccessResponse>
   logout: () => void
+  /** Şifremi unuttum: e-posta alır, başarılı/başarısız sonucunu döner */
+  forgotPassword: (email: string) => Promise<{ message?: string }>
+  /**
+   * Şifre yenileme: mail linkinden gelen token ve yeni şifre ile
+   * backend’e istekte bulunur.
+   */
+  resetPassword: (token: string, newPassword: string) => Promise<{ message?: string }>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -112,12 +119,67 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
+  const forgotPassword = useCallback(
+    async (email: string): Promise<{ message?: string }> => {
+      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      const text = await res.text()
+      let data: ApiErrorBody | null = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          throw new Error('Sunucudan beklenmeyen yanıt alındı.')
+        }
+      }
+      if (!res.ok) {
+        throw new Error(getErrorMessageFromResponse(data, 'Şifre sıfırlama e-postası gönderilemedi.'))
+      }
+      return { message: data?.message }
+    },
+    []
+  )
+
+  const resetPassword = useCallback(
+    async (token: string, newPassword: string): Promise<{ message?: string }> => {
+      const res = await fetch(`${API_BASE}/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, newPassword }),
+      })
+      const text = await res.text()
+      let data: ApiErrorBody | null = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          throw new Error('Sunucudan beklenmeyen yanıt alındı.')
+        }
+      }
+      if (!res.ok) {
+        throw new Error(getErrorMessageFromResponse(data, 'Şifre yenileme başarısız.'))
+      }
+      return { message: data?.message }
+    },
+    []
+  )
+
   const logout = useCallback(() => {
     clearAuth()
     setState({ token: null, user: null, isReady: true })
   }, [])
 
-  const value: AuthContextValue = { ...state, login, register, logout }
+  const value: AuthContextValue = {
+    ...state,
+    login,
+    register,
+    logout,
+    forgotPassword,
+    resetPassword,
+  }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
