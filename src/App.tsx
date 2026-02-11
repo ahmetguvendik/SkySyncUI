@@ -9,9 +9,7 @@ import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import './App.css'
 
-// React Strict Mode (dev) effect'i iki kez çalıştırır; aynı isteğin iki kez gitmesini önlemek için kısa süreli dedupe
-let lastFlightListFetchStart = 0
-const FLIGHT_LIST_FETCH_DEBOUNCE_MS = 2000
+const FLIGHT_LIST_PAGE_SIZE = 20
 
 function Dashboard() {
   const { user, logout } = useAuth()
@@ -47,6 +45,10 @@ function Dashboard() {
   >([])
   const [flightsLoading, setFlightsLoading] = useState(false)
   const [flightsError, setFlightsError] = useState<string | null>(null)
+  const [flightsPage, setFlightsPage] = useState(1)
+  const [flightSearchDeparture, setFlightSearchDeparture] = useState('')
+  const [flightSearchDestination, setFlightSearchDestination] = useState('')
+  const [flightSearchDate, setFlightSearchDate] = useState('')
 
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null)
   const [selectedFlightSeats, setSelectedFlightSeats] = useState<{
@@ -111,6 +113,7 @@ function Dashboard() {
   >([])
   const [reservationsLoading, setReservationsLoading] = useState(false)
   const [reservationsError, setReservationsError] = useState<string | null>(null)
+  const [reservationsPage, setReservationsPage] = useState(1)
 
   const toggleSeatSelection = (seatId: string, isReserved: boolean) => {
     if (isReserved || !selectedFlightSeats) return
@@ -216,11 +219,28 @@ function Dashboard() {
     }
   }
 
-  const fetchFlights = async () => {
+  const fetchFlights = async (page: number) => {
     try {
+      const dep = flightSearchDeparture.trim().toUpperCase()
+      const dest = flightSearchDestination.trim().toUpperCase()
+      const date = flightSearchDate.trim()
+
+      if (!dep || !dest || !date) {
+        setFlightsError('Lütfen kalkış, varış ve kalkış tarihini girin.')
+        setFlights([])
+        return
+      }
+
       setFlightsLoading(true)
       setFlightsError(null)
-      const res = await fetchWithAuth('flight')
+      const params = new URLSearchParams()
+      params.append('departure', dep)
+      params.append('destination', dest)
+      params.append('departureDate', date)
+      params.append('page', String(page))
+      params.append('pageSize', String(FLIGHT_LIST_PAGE_SIZE))
+
+      const res = await fetchWithAuth(`flight?${params.toString()}`)
       const text = await res.text()
 
       let data: any = null
@@ -241,7 +261,8 @@ function Dashboard() {
         return
       }
 
-      setFlights(data?.flights ?? [])
+      const list = Array.isArray(data) ? data : (data?.flights ?? data?.items ?? data?.data ?? [])
+      setFlights(Array.isArray(list) ? list : [])
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Beklenmeyen bir hata oluştu.'
       setFlightsError(message)
@@ -485,7 +506,7 @@ function Dashboard() {
       setReservationsLoading(true)
       setReservationsError(null)
       const emailEncoded = encodeURIComponent(user.email)
-      const res = await fetchWithAuth(`reservation/passenger/${emailEncoded}`)
+      const res = await fetchWithAuth(`reservation/passenger/${emailEncoded}?page=${reservationsPage}`)
       const text = await res.text()
       let data: { reservations?: typeof reservations } | typeof reservations | null = null
       if (text) {
@@ -502,7 +523,10 @@ function Dashboard() {
         setReservations([])
         return
       }
-      const list = Array.isArray(data) ? data : (data?.reservations ?? [])
+      const anyData: any = data
+      const list = Array.isArray(anyData)
+        ? anyData
+        : (anyData?.reservations ?? anyData?.items ?? anyData?.data ?? [])
       setReservations(Array.isArray(list) ? list : [])
     } catch (err) {
       setReservationsError(err instanceof Error ? err.message : 'Rezervasyonlar yüklenemedi.')
@@ -510,7 +534,7 @@ function Dashboard() {
     } finally {
       setReservationsLoading(false)
     }
-  }, [user?.email])
+  }, [user?.email, reservationsPage])
 
   const fetchAircrafts = React.useCallback(async () => {
     try {
@@ -556,13 +580,6 @@ function Dashboard() {
     } finally {
       setAircraftsLoading(false)
     }
-  }, [])
-
-  useEffect(() => {
-    const now = Date.now()
-    if (now - lastFlightListFetchStart < FLIGHT_LIST_FETCH_DEBOUNCE_MS) return
-    lastFlightListFetchStart = now
-    fetchFlights()
   }, [])
 
   useEffect(() => {
@@ -765,14 +782,43 @@ function Dashboard() {
           <section className="card card-secondary">
             <div className="section-header">
               <h2 className="section-title">Rezervasyonlarım</h2>
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={fetchReservations}
-                disabled={reservationsLoading}
-              >
-                {reservationsLoading ? 'Yenileniyor...' : 'Yenile'}
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={fetchReservations}
+                  disabled={reservationsLoading}
+                >
+                  {reservationsLoading ? 'Yenileniyor...' : 'Yenile'}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    if (reservationsPage <= 1 || reservationsLoading) return
+                    const nextPage = reservationsPage - 1
+                    setReservationsPage(nextPage)
+                    fetchReservations()
+                  }}
+                  disabled={reservationsPage <= 1 || reservationsLoading}
+                >
+                  Önceki
+                </button>
+                <span className="muted-text">Sayfa {reservationsPage}</span>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    if (reservationsLoading) return
+                    const nextPage = reservationsPage + 1
+                    setReservationsPage(nextPage)
+                    fetchReservations()
+                  }}
+                  disabled={reservationsLoading}
+                >
+                  Sonraki
+                </button>
+              </div>
             </div>
             <p className="muted-text" style={{ marginBottom: '1rem' }}>
               E-posta: <span className="mono">{user?.email}</span>
@@ -861,14 +907,91 @@ function Dashboard() {
         <section className="card card-secondary">
           <div className="section-header">
             <h2 className="section-title">Uçuş Listesi</h2>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={fetchFlights}
-              disabled={flightsLoading}
-            >
-              {flightsLoading ? 'Yenileniyor...' : 'Listeyi Yenile'}
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <form
+                className="form-grid"
+                style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', columnGap: '0.75rem' }}
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  setFlightsPage(1)
+                  fetchFlights(1)
+                }}
+              >
+                <div className="form-field">
+                  <label htmlFor="search-departure">Kalkış (IATA)</label>
+                  <input
+                    id="search-departure"
+                    type="text"
+                    maxLength={3}
+                    placeholder="IST"
+                    value={flightSearchDeparture}
+                    onChange={(e) => setFlightSearchDeparture(e.target.value.toUpperCase())}
+                  />
+                </div>
+                <div className="form-field">
+                  <label htmlFor="search-destination">Varış (IATA)</label>
+                  <input
+                    id="search-destination"
+                    type="text"
+                    maxLength={3}
+                    placeholder="AMS"
+                    value={flightSearchDestination}
+                    onChange={(e) => setFlightSearchDestination(e.target.value.toUpperCase())}
+                  />
+                </div>
+                <div className="form-field">
+                  <label htmlFor="search-date">Kalkış Tarihi</label>
+                  <input
+                    id="search-date"
+                    type="date"
+                    value={flightSearchDate}
+                    onChange={(e) => setFlightSearchDate(e.target.value)}
+                  />
+                </div>
+                <div className="form-field" style={{ alignSelf: 'end' }}>
+                  <button type="submit" disabled={flightsLoading}>
+                    {flightsLoading ? 'Aranıyor...' : 'Uçuş Ara'}
+                  </button>
+                </div>
+              </form>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => fetchFlights(flightsPage)}
+                  disabled={flightsLoading}
+                >
+                  {flightsLoading ? 'Yenileniyor...' : 'Listeyi Yenile'}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    if (flightsPage <= 1 || flightsLoading) return
+                    const nextPage = flightsPage - 1
+                    setFlightsPage(nextPage)
+                    fetchFlights(nextPage)
+                  }}
+                  disabled={flightsPage <= 1 || flightsLoading}
+                >
+                  Önceki
+                </button>
+                <span className="muted-text">Sayfa {flightsPage}</span>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    if (flightsLoading) return
+                    const nextPage = flightsPage + 1
+                    setFlightsPage(nextPage)
+                    fetchFlights(nextPage)
+                  }}
+                  disabled={flightsLoading}
+                >
+                  Sonraki
+                </button>
+              </div>
+            </div>
           </div>
 
           {flightsError && <div className="alert alert-error">{flightsError}</div>}
