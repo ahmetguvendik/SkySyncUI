@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { fetchWithAuth, getErrorMessageFromResponse } from './api/client'
 import { getCurrentTraceparent, runWithTraceContext } from './tracing'
@@ -10,6 +10,54 @@ import ResetPassword from './pages/ResetPassword'
 import './App.css'
 
 const FLIGHT_LIST_PAGE_SIZE = 20
+const MAX_LAST_SEARCHES = 3
+const LAST_FLIGHT_SEARCHES_KEY = 'skysync_last_flight_searches'
+
+type TripType = 'oneWay' | 'roundTrip'
+type LastSearch = { departure: string; destination: string; departureDate: string; returnDate?: string; tripType?: TripType }
+
+function getLastFlightSearches(): LastSearch[] {
+  try {
+    const raw = localStorage.getItem(LAST_FLIGHT_SEARCHES_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.slice(0, MAX_LAST_SEARCHES) : []
+  } catch {
+    return []
+  }
+}
+
+function saveLastFlightSearches(list: LastSearch[]) {
+  try {
+    localStorage.setItem(LAST_FLIGHT_SEARCHES_KEY, JSON.stringify(list.slice(0, MAX_LAST_SEARCHES)))
+  } catch {}
+}
+
+function normalizeFlight(f: Record<string, unknown>): {
+  id: string
+  flightNumber: string
+  departure: string
+  destination: string
+  departureTime: string
+  arrivalTime: string
+  basePrice: number
+  status: string
+  availableSeats: number
+  totalSeats: number
+} {
+  return {
+    id: String(f.id ?? f.Id ?? ''),
+    flightNumber: String(f.flightNumber ?? f.FlightNumber ?? ''),
+    departure: String(f.departure ?? f.Departure ?? ''),
+    destination: String(f.destination ?? f.Destination ?? ''),
+    departureTime: String(f.departureTime ?? f.DepartureTime ?? ''),
+    arrivalTime: String(f.arrivalTime ?? f.ArrivalTime ?? ''),
+    basePrice: Number(f.basePrice ?? f.BasePrice ?? 0),
+    status: String(f.status ?? f.Status ?? ''),
+    availableSeats: Number(f.availableSeats ?? f.AvailableSeats ?? 0),
+    totalSeats: Number(f.totalSeats ?? f.TotalSeats ?? 0),
+  }
+}
 
 function Dashboard() {
   const { user, logout } = useAuth()
@@ -49,6 +97,12 @@ function Dashboard() {
   const [flightSearchDeparture, setFlightSearchDeparture] = useState('')
   const [flightSearchDestination, setFlightSearchDestination] = useState('')
   const [flightSearchDate, setFlightSearchDate] = useState('')
+  const [flightSearchReturnDate, setFlightSearchReturnDate] = useState('')
+  const [tripType, setTripType] = useState<TripType>('oneWay')
+  const [returnFlights, setReturnFlights] = useState<
+    { id: string; flightNumber: string; departure: string; destination: string; departureTime: string; arrivalTime: string; basePrice: number; status: string; availableSeats: number; totalSeats: number }[]
+  >([])
+  const [lastFlightSearches, setLastFlightSearches] = useState<LastSearch[]>(() => getLastFlightSearches())
 
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null)
   const [selectedFlightSeats, setSelectedFlightSeats] = useState<{
@@ -68,7 +122,6 @@ function Dashboard() {
   const [seatsLoading, setSeatsLoading] = useState(false)
   const [seatsError, setSeatsError] = useState<string | null>(null)
   const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([])
-  const [activeSeatId, setActiveSeatId] = useState<string | null>(null)
   const [reservationName, setReservationName] = useState('')
   const [reservationSurname, setReservationSurname] = useState('')
   const [reservationEmail, setReservationEmail] = useState('')
@@ -85,13 +138,26 @@ function Dashboard() {
     message?: string
     traceparent?: string
     tracestate?: string
-  } | null>(null)
+    seatNumber?: string
+    amount?: number
+  }[] | null>(null)
   const [paymentComplete, setPaymentComplete] = useState(false)
   const [paymentResult, setPaymentResult] = useState<{
     transactionId?: string
     message?: string
   } | null>(null)
-  const [activeView, setActiveView] = useState<'list' | 'create' | 'reservations'>('list')
+  const [activeView, setActiveView] = useState<'list' | 'create' | 'reservations' | 'airports'>('list')
+
+  const [airports, setAirports] = useState<{ id: string; code: string; name: string; city: string; country: string }[]>([])
+  const [airportsLoading, setAirportsLoading] = useState(false)
+  const [airportsError, setAirportsError] = useState<string | null>(null)
+  const [airportCode, setAirportCode] = useState('')
+  const [airportName, setAirportName] = useState('')
+  const [airportCity, setAirportCity] = useState('')
+  const [airportCountry, setAirportCountry] = useState('')
+  const [airportCreateLoading, setAirportCreateLoading] = useState(false)
+  const [airportCreateMessage, setAirportCreateMessage] = useState<string | null>(null)
+  const [airportCreateSuccess, setAirportCreateSuccess] = useState(false)
 
   const [reservations, setReservations] = useState<
     {
@@ -115,12 +181,16 @@ function Dashboard() {
   const [reservationsError, setReservationsError] = useState<string | null>(null)
   const [reservationsPage, setReservationsPage] = useState(1)
 
+  const MAX_SELECTABLE_SEATS = 3
+
   const toggleSeatSelection = (seatId: string, isReserved: boolean) => {
     if (isReserved || !selectedFlightSeats) return
 
-    // Tek koltuk seçimi
-    setSelectedSeatIds([seatId])
-    setActiveSeatId(seatId)
+    setSelectedSeatIds((prev) => {
+      if (prev.includes(seatId)) return prev.filter((id) => id !== seatId)
+      if (prev.length >= MAX_SELECTABLE_SEATS) return prev
+      return [...prev, seatId]
+    })
     setReservationError(null)
     setReservationSuccess(null)
     setReservationName('')
@@ -219,11 +289,34 @@ function Dashboard() {
     }
   }
 
+  const doFetchFlights = async (dep: string, dest: string, date: string, page: number) => {
+    const params = new URLSearchParams()
+    params.append('departure', dep)
+    params.append('destination', dest)
+    params.append('departureDate', date)
+    params.append('page', String(page))
+    params.append('pageSize', String(FLIGHT_LIST_PAGE_SIZE))
+    const res = await fetchWithAuth(`flight?${params.toString()}`)
+    const text = await res.text()
+    let data: any = null
+    if (text) {
+      try {
+        data = JSON.parse(text)
+      } catch {
+        if (!res.ok) throw new Error(text)
+      }
+    }
+    if (!res.ok) throw new Error(getErrorMessageFromResponse(data, 'Uçuşlar alınırken bir hata oluştu.'))
+    const raw = Array.isArray(data) ? data : (data?.flights ?? data?.Flights ?? data?.items ?? data?.data ?? [])
+    return Array.isArray(raw) ? raw.map((f: Record<string, unknown>) => normalizeFlight(f)) : []
+  }
+
   const fetchFlights = async (page: number) => {
     try {
       const dep = flightSearchDeparture.trim().toUpperCase()
       const dest = flightSearchDestination.trim().toUpperCase()
       const date = flightSearchDate.trim()
+      const returnDate = flightSearchReturnDate.trim()
 
       if (!dep || !dest || !date) {
         setFlightsError('Lütfen kalkış, varış ve kalkış tarihini girin.')
@@ -231,54 +324,94 @@ function Dashboard() {
         return
       }
 
-      setFlightsLoading(true)
-      setFlightsError(null)
-      const params = new URLSearchParams()
-      params.append('departure', dep)
-      params.append('destination', dest)
-      params.append('departureDate', date)
-      params.append('page', String(page))
-      params.append('pageSize', String(FLIGHT_LIST_PAGE_SIZE))
-
-      const res = await fetchWithAuth(`flight?${params.toString()}`)
-      const text = await res.text()
-
-      let data: any = null
-      if (text) {
-        try {
-          data = JSON.parse(text)
-        } catch {
-          if (!res.ok) throw new Error(text)
-        }
-      }
-
-      if (!res.ok) {
-        throw new Error(getErrorMessageFromResponse(data, 'Uçuşlar alınırken bir hata oluştu.'))
-      }
-
-      if (!text) {
+      if (tripType === 'roundTrip' && !returnDate) {
+        setFlightsError('Gidiş-dönüş için dönüş tarihini girin.')
         setFlights([])
         return
       }
 
-      const list = Array.isArray(data) ? data : (data?.flights ?? data?.items ?? data?.data ?? [])
-      setFlights(Array.isArray(list) ? list : [])
+      setFlightsLoading(true)
+      setFlightsError(null)
+      setReturnFlights([])
+      const outboundList = await doFetchFlights(dep, dest, date, page)
+      setFlights(outboundList)
+
+      if (tripType === 'roundTrip' && returnDate) {
+        const returnList = await doFetchFlights(dest, dep, returnDate, 1)
+        setReturnFlights(returnList)
+      }
+
+      const entry: LastSearch = {
+        departure: dep,
+        destination: dest,
+        departureDate: date,
+        ...(tripType === 'roundTrip' && returnDate ? { returnDate, tripType: 'roundTrip' as const } : {}),
+      }
+      const key = tripType === 'roundTrip' ? `${dep}-${dest}-${date}-${returnDate}` : `${dep}-${dest}-${date}`
+      setLastFlightSearches((prev) => {
+        const next = [
+          entry,
+          ...prev.filter((s) => {
+            const sk = s.tripType === 'roundTrip' && s.returnDate
+              ? `${s.departure}-${s.destination}-${s.departureDate}-${s.returnDate}`
+              : `${s.departure}-${s.destination}-${s.departureDate}`
+            return sk !== key
+          }),
+        ].slice(0, MAX_LAST_SEARCHES)
+        saveLastFlightSearches(next)
+        return next
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Beklenmeyen bir hata oluştu.'
       setFlightsError(message)
+      setFlights([])
     } finally {
       setFlightsLoading(false)
     }
   }
 
+  const loadFromLastSearch = (s: LastSearch) => {
+    setFlightSearchDeparture(s.departure)
+    setFlightSearchDestination(s.destination)
+    setFlightSearchDate(s.departureDate)
+    setFlightSearchReturnDate(s.returnDate ?? '')
+    setTripType(s.tripType ?? 'oneWay')
+    setFlightsPage(1)
+    setFlightsError(null)
+    setFlightsLoading(true)
+    setReturnFlights([])
+    doFetchFlights(s.departure, s.destination, s.departureDate, 1)
+      .then((outboundList) => {
+        setFlights(outboundList)
+        if (s.tripType === 'roundTrip' && s.returnDate) {
+          return doFetchFlights(s.destination, s.departure, s.returnDate, 1).then((returnList) => {
+            setReturnFlights(returnList)
+          })
+        }
+      })
+      .catch((err) => setFlightsError(err instanceof Error ? err.message : 'Hata oluştu.'))
+      .finally(() => setFlightsLoading(false))
+  }
+
+  const closeSeats = useCallback(() => {
+    setSelectedFlightSeats(null)
+    setSelectedFlightId(null)
+    setSelectedSeatIds([])
+    setReservationError(null)
+    setReservationSuccess(null)
+  }, [])
+
   const fetchSeats = async (flightId: string) => {
+    if (selectedFlightId === flightId && selectedFlightSeats) {
+      closeSeats()
+      return
+    }
     try {
       setSeatsLoading(true)
       setSeatsError(null)
       setSelectedFlightSeats(null)
       setSelectedFlightId(flightId)
       setSelectedSeatIds([])
-      setActiveSeatId(null)
       setReservationError(null)
       setReservationSuccess(null)
 
@@ -313,10 +446,10 @@ function Dashboard() {
 
   const handleReservationSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedFlightSeats || !activeSeatId) return
+    if (!selectedFlightSeats || selectedSeatIds.length === 0) return
 
-    const activeSeat = selectedFlightSeats.seats.find((s) => s.id === activeSeatId)
-    if (!activeSeat) return
+    const seatsToReserve = selectedFlightSeats.seats.filter((s) => selectedSeatIds.includes(s.id))
+    if (seatsToReserve.length === 0) return
 
     if (!reservationName || !reservationSurname || !reservationEmail) {
       setReservationError('Lütfen yolcu adı, soyadı ve e-posta alanlarını doldurun.')
@@ -327,54 +460,55 @@ function Dashboard() {
       setReservationLoading(true)
       setReservationError(null)
 
-      const payload = {
-        flightId: selectedFlightSeats.flightId,
-        seatNumber: activeSeat.seatNumber,
-        price: activeSeat.price,
-        passengerName: reservationName,
-        passengerSurname: reservationSurname,
-        passengerEmail: reservationEmail,
-      }
+      const results: { correlationId?: string; reservationId?: string; message?: string; traceparent?: string; tracestate?: string; seatNumber?: string; amount?: number }[] = []
 
-      const res = await fetchWithAuth('reservation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-
-      // Cevap gelir gelmez traceparent al (body okunmadan; aktif span hâlâ rezervasyon isteği)
-      let traceparent = res.headers.get('traceparent') ?? undefined
-      let tracestate = res.headers.get('tracestate') ?? undefined
-      if (!traceparent) {
-        const fromSpan = getCurrentTraceparent()
-        if (fromSpan) traceparent = fromSpan
-      }
-
-      const text = await res.text()
-      let data: any = null
-      if (text) {
-        try {
-          data = JSON.parse(text)
-        } catch {
-          // JSON değilse, sadece mesaj gösteririz
+      for (const seat of seatsToReserve) {
+        const payload = {
+          flightId: selectedFlightSeats.flightId,
+          seatNumber: seat.seatNumber,
+          price: seat.price,
+          passengerName: reservationName,
+          passengerSurname: reservationSurname,
+          passengerEmail: reservationEmail,
         }
+
+        const res = await fetchWithAuth('reservation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+
+        let traceparent = res.headers.get('traceparent') ?? undefined
+        let tracestate = res.headers.get('tracestate') ?? undefined
+        if (!traceparent) {
+          const fromSpan = getCurrentTraceparent()
+          if (fromSpan) traceparent = fromSpan
+        }
+
+        const text = await res.text()
+        let data: any = null
+        if (text) {
+          try {
+            data = JSON.parse(text)
+          } catch {}
+        }
+
+        if (!res.ok || data?.isSuccess === false) {
+          throw new Error(getErrorMessageFromResponse(data, 'Rezervasyon oluşturulurken bir hata oluştu.'))
+        }
+
+        results.push({
+          correlationId: data?.correlationId,
+          reservationId: data?.reservationId,
+          message: data?.message || 'Rezervasyon oluşturuldu.',
+          traceparent: traceparent ?? data?.traceparent ?? undefined,
+          tracestate: tracestate ?? data?.tracestate ?? undefined,
+          seatNumber: seat.seatNumber,
+          amount: seat.price,
+        })
       }
 
-      if (!res.ok || data?.isSuccess === false) {
-        throw new Error(getErrorMessageFromResponse(data, 'Rezervasyon oluşturulurken bir hata oluştu.'))
-      }
-
-      // Body'de traceparent dönüyorsa onu da kullan (backend bazen header yerine body'de verir)
-      const finalTraceparent = traceparent ?? data?.traceparent ?? undefined
-      const finalTracestate = tracestate ?? data?.tracestate ?? undefined
-
-      setReservationSuccess({
-        correlationId: data?.correlationId,
-        reservationId: data?.reservationId,
-        message: data?.message || 'Rezervasyon oluşturuldu. Ödemeyi tamamlayın.',
-        traceparent: finalTraceparent,
-        tracestate: finalTracestate,
-      })
+      setReservationSuccess(results)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Beklenmeyen bir hata oluştu.'
       setReservationError(message)
@@ -387,16 +521,14 @@ function Dashboard() {
     e.preventDefault()
     setReservationError(null)
 
-    if (!reservationSuccess?.reservationId || !reservationSuccess?.correlationId || !selectedFlightSeats || !activeSeatId) {
-      setReservationError(reservationSuccess?.reservationId && !reservationSuccess?.correlationId
-        ? 'Rezervasyon cevabında correlationId yok; ödeme yapılamıyor.'
-        : 'Rezervasyon bilgisi eksik.')
+    if (!reservationSuccess?.length || !selectedFlightSeats) {
+      setReservationError('Rezervasyon bilgisi eksik.')
       return
     }
 
-    const activeSeat = selectedFlightSeats.seats.find((s) => s.id === activeSeatId)
-    if (!activeSeat) {
-      setReservationError('Koltuk bilgisi bulunamadı.')
+    const hasInvalid = reservationSuccess.some((r) => !r.reservationId || !r.correlationId)
+    if (hasInvalid) {
+      setReservationError('Rezervasyon cevabında correlationId yok; ödeme yapılamıyor.')
       return
     }
 
@@ -433,52 +565,51 @@ function Dashboard() {
     try {
       setPaymentLoading(true)
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+      const transactionIds: string[] = []
 
-      const payload = {
-        correlationId: reservationSuccess.correlationId,
-        reservationId: reservationSuccess.reservationId,
-        amount: activeSeat.price,
-        expiresAt,
-        cardNumber: cardNumDigits,
-      }
-
-      const paymentHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (reservationSuccess.traceparent) paymentHeaders['traceparent'] = reservationSuccess.traceparent
-      if (reservationSuccess.tracestate) paymentHeaders['tracestate'] = reservationSuccess.tracestate
-
-      const doPaymentFetch = () =>
-        fetchWithAuth('payment/process', {
-          method: 'POST',
-          headers: paymentHeaders,
-          body: JSON.stringify(payload),
-        })
-
-      const res =
-        reservationSuccess.traceparent != null
-          ? await runWithTraceContext(
-              reservationSuccess.traceparent,
-              reservationSuccess.tracestate,
-              doPaymentFetch
-            )
-          : await doPaymentFetch()
-
-      const text = await res.text()
-      let data: { success?: boolean; transactionId?: string; message?: string; code?: string | null } | null = null
-      if (text) {
-        try {
-          data = JSON.parse(text)
-        } catch {
-          // ignore
+      for (const resv of reservationSuccess) {
+        const payload = {
+          correlationId: resv.correlationId,
+          reservationId: resv.reservationId,
+          amount: resv.amount ?? 0,
+          expiresAt,
+          cardNumber: cardNumDigits,
         }
-      }
 
-      if (!res.ok || data?.success !== true) {
-        throw new Error(data?.message ?? 'Ödeme işlenirken bir hata oluştu.')
+        const paymentHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+        if (resv.traceparent) paymentHeaders['traceparent'] = resv.traceparent
+        if (resv.tracestate) paymentHeaders['tracestate'] = resv.tracestate
+
+        const doPaymentFetch = () =>
+          fetchWithAuth('payment/process', {
+            method: 'POST',
+            headers: paymentHeaders,
+            body: JSON.stringify(payload),
+          })
+
+        const res =
+          resv.traceparent != null
+            ? await runWithTraceContext(resv.traceparent, resv.tracestate, doPaymentFetch)
+            : await doPaymentFetch()
+
+        const text = await res.text()
+        let data: { success?: boolean; transactionId?: string; message?: string; code?: string | null } | null = null
+        if (text) {
+          try {
+            data = JSON.parse(text)
+          } catch {}
+        }
+
+        if (!res.ok || data?.success !== true) {
+          throw new Error(data?.message ?? 'Ödeme işlenirken bir hata oluştu.')
+        }
+
+        if (data?.transactionId) transactionIds.push(data.transactionId)
       }
 
       setPaymentResult({
-        transactionId: data.transactionId,
-        message: data.message ?? 'Ödeme başarıyla tamamlandı.',
+        transactionId: transactionIds.join(', '),
+        message: `${reservationSuccess.length} rezervasyon için ödeme başarıyla tamamlandı.`,
       })
       setPaymentComplete(true)
       setCardNumber('')
@@ -494,11 +625,11 @@ function Dashboard() {
   }
 
   useEffect(() => {
-    if (!activeSeatId) return
+    if (selectedSeatIds.length === 0) return
     setReservationSuccess(null)
     setPaymentComplete(false)
     setPaymentResult(null)
-  }, [activeSeatId])
+  }, [selectedSeatIds])
 
   const fetchReservations = React.useCallback(async () => {
     if (!user?.email) return
@@ -582,6 +713,81 @@ function Dashboard() {
     }
   }, [])
 
+  const fetchAirports = React.useCallback(async () => {
+    try {
+      setAirportsLoading(true)
+      setAirportsError(null)
+      const res = await fetchWithAuth('airport')
+      const text = await res.text()
+      let data: { airports?: { id: string; code: string; name: string; city: string; country: string }[] } | null = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          if (!res.ok) throw new Error(text)
+        }
+      }
+      if (!res.ok) throw new Error(getErrorMessageFromResponse(data as import('./api/client').ApiErrorBody | null, 'Havalimanları alınamadı.'))
+      const raw = (data as any)?.airports ?? (data as any)?.Airports ?? []
+      const list = Array.isArray(raw) ? raw.map((a: any) => ({
+        id: String(a.id ?? a.Id ?? ''),
+        code: String(a.code ?? a.Code ?? ''),
+        name: String(a.name ?? a.Name ?? ''),
+        city: String(a.city ?? a.City ?? ''),
+        country: String(a.country ?? a.Country ?? ''),
+      })) : []
+      setAirports(list)
+    } catch (err) {
+      setAirportsError(err instanceof Error ? err.message : 'Havalimanları yüklenemedi.')
+      setAirports([])
+    } finally {
+      setAirportsLoading(false)
+    }
+  }, [])
+
+  const handleCreateAirport = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!airportCode.trim() || !airportName.trim() || !airportCity.trim() || !airportCountry.trim()) {
+      setAirportCreateMessage('Tüm alanları doldurun.')
+      return
+    }
+    try {
+      setAirportCreateLoading(true)
+      setAirportCreateMessage(null)
+      setAirportCreateSuccess(false)
+      const res = await fetchWithAuth('airport', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: airportCode.trim().toUpperCase(),
+          name: airportName.trim(),
+          city: airportCity.trim(),
+          country: airportCountry.trim(),
+        }),
+      })
+      const text = await res.text()
+      let data: { airportId?: string; isSuccess?: boolean; message?: string } | null = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {}
+      }
+      if (!res.ok) throw new Error(getErrorMessageFromResponse(data, 'Havalimanı oluşturulamadı.'))
+      setAirportCreateSuccess(true)
+      setAirportCreateMessage(data?.message ?? 'Havalimanı başarıyla oluşturuldu.')
+      setAirportCode('')
+      setAirportName('')
+      setAirportCity('')
+      setAirportCountry('')
+      fetchAirports()
+    } catch (err) {
+      setAirportCreateSuccess(false)
+      setAirportCreateMessage(err instanceof Error ? err.message : 'Havalimanı oluşturulamadı.')
+    } finally {
+      setAirportCreateLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (activeView === 'create') fetchAircrafts()
   }, [activeView, fetchAircrafts])
@@ -589,6 +795,10 @@ function Dashboard() {
   useEffect(() => {
     if (activeView === 'reservations' && user?.email) fetchReservations()
   }, [activeView, user?.email, fetchReservations])
+
+  useEffect(() => {
+    if (activeView === 'airports') fetchAirports()
+  }, [activeView, fetchAirports])
 
   return (
     <div className="app-root">
@@ -651,6 +861,17 @@ function Dashboard() {
                 onClick={() => setActiveView('reservations')}
               >
                 Rezervasyonlarım
+              </button>
+              <button
+                type="button"
+                className={
+                  activeView === 'airports'
+                    ? 'view-toggle-button view-toggle-button-active'
+                    : 'view-toggle-button'
+                }
+                onClick={() => setActiveView('airports')}
+              >
+                Havalimanları
               </button>
             </nav>
             </div>
@@ -903,20 +1124,149 @@ function Dashboard() {
           </section>
         )}
 
+        {activeView === 'airports' && (
+          <section className="card card-secondary">
+            <div className="section-header">
+              <h2 className="section-title">Havalimanları</h2>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={fetchAirports}
+                disabled={airportsLoading}
+              >
+                {airportsLoading ? 'Yenileniyor...' : 'Yenile'}
+              </button>
+            </div>
+
+            <h3 className="section-title" style={{ marginTop: '1.5rem' }}>Yeni Havalimanı Ekle</h3>
+            <form className="form-grid" onSubmit={handleCreateAirport}>
+              <div className="form-row">
+                <div className="form-field">
+                  <label htmlFor="airport-code">Kod (IATA)</label>
+                  <input
+                    id="airport-code"
+                    type="text"
+                    maxLength={3}
+                    placeholder="IST"
+                    value={airportCode}
+                    onChange={(e) => setAirportCode(e.target.value.toUpperCase())}
+                  />
+                </div>
+                <div className="form-field">
+                  <label htmlFor="airport-name">Ad</label>
+                  <input
+                    id="airport-name"
+                    type="text"
+                    placeholder="İstanbul Havalimanı"
+                    value={airportName}
+                    onChange={(e) => setAirportName(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-field">
+                  <label htmlFor="airport-city">Şehir</label>
+                  <input
+                    id="airport-city"
+                    type="text"
+                    placeholder="İstanbul"
+                    value={airportCity}
+                    onChange={(e) => setAirportCity(e.target.value)}
+                  />
+                </div>
+                <div className="form-field">
+                  <label htmlFor="airport-country">Ülke</label>
+                  <input
+                    id="airport-country"
+                    type="text"
+                    placeholder="Türkiye"
+                    value={airportCountry}
+                    onChange={(e) => setAirportCountry(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="form-actions">
+                <button type="submit" disabled={airportCreateLoading}>
+                  {airportCreateLoading ? 'Ekleniyor...' : 'Havalimanı Ekle'}
+                </button>
+              </div>
+            </form>
+            {airportCreateMessage && (
+              <div className={`alert ${airportCreateSuccess ? 'alert-success' : 'alert-error'}`} style={{ marginTop: '1rem' }}>
+                {airportCreateMessage}
+              </div>
+            )}
+
+            {airportsError && <div className="alert alert-error" style={{ marginTop: '1rem' }}>{airportsError}</div>}
+            {airportsLoading && airports.length === 0 && (
+              <p className="muted-text" style={{ marginTop: '1rem' }}>Havalimanları yükleniyor...</p>
+            )}
+            {!airportsLoading && airports.length === 0 && !airportsError && (
+              <p className="muted-text" style={{ marginTop: '1rem' }}>Henüz havalimanı bulunmuyor.</p>
+            )}
+            {airports.length > 0 && (
+              <div className="flights-table-wrapper" style={{ marginTop: '1.5rem' }}>
+                <table className="flights-table">
+                  <thead>
+                    <tr>
+                      <th>Kod</th>
+                      <th>Ad</th>
+                      <th>Şehir</th>
+                      <th>Ülke</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {airports.map((a) => (
+                      <tr key={a.id} className="flight-row">
+                        <td><span className="mono">{a.code}</span></td>
+                        <td>{a.name}</td>
+                        <td>{a.city}</td>
+                        <td>{a.country}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+
         {activeView === 'list' && (
         <section className="card card-secondary">
           <div className="section-header">
             <h2 className="section-title">Uçuş Listesi</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <form
-                className="form-grid"
-                style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', columnGap: '0.75rem' }}
+                className="form-grid flight-search-form"
                 onSubmit={(e) => {
                   e.preventDefault()
                   setFlightsPage(1)
                   fetchFlights(1)
                 }}
               >
+                <div className="form-field trip-type-field">
+                  <label>Yolculuk tipi</label>
+                  <div className="trip-type-toggle">
+                    <button
+                      type="button"
+                      className={tripType === 'oneWay' ? 'trip-type-btn active' : 'trip-type-btn'}
+                      onClick={() => {
+                        setTripType('oneWay')
+                        setFlightSearchReturnDate('')
+                        setReturnFlights([])
+                      }}
+                    >
+                      Tek yön
+                    </button>
+                    <button
+                      type="button"
+                      className={tripType === 'roundTrip' ? 'trip-type-btn active' : 'trip-type-btn'}
+                      onClick={() => setTripType('roundTrip')}
+                    >
+                      Gidiş-dönüş
+                    </button>
+                  </div>
+                </div>
                 <div className="form-field">
                   <label htmlFor="search-departure">Kalkış (IATA)</label>
                   <input
@@ -940,7 +1290,7 @@ function Dashboard() {
                   />
                 </div>
                 <div className="form-field">
-                  <label htmlFor="search-date">Kalkış Tarihi</label>
+                  <label htmlFor="search-date">Gidiş Tarihi</label>
                   <input
                     id="search-date"
                     type="date"
@@ -948,12 +1298,40 @@ function Dashboard() {
                     onChange={(e) => setFlightSearchDate(e.target.value)}
                   />
                 </div>
+                {tripType === 'roundTrip' && (
+                  <div className="form-field">
+                    <label htmlFor="search-return-date">Dönüş Tarihi</label>
+                    <input
+                      id="search-return-date"
+                      type="date"
+                      value={flightSearchReturnDate}
+                      onChange={(e) => setFlightSearchReturnDate(e.target.value)}
+                    />
+                  </div>
+                )}
                 <div className="form-field" style={{ alignSelf: 'end' }}>
                   <button type="submit" disabled={flightsLoading}>
                     {flightsLoading ? 'Aranıyor...' : 'Uçuş Ara'}
                   </button>
                 </div>
               </form>
+              {lastFlightSearches.length > 0 && (
+                <div className="last-searches">
+                  <span className="muted-text" style={{ marginRight: '0.5rem' }}>Son aramalar:</span>
+                  {lastFlightSearches.map((s, i) => (
+                    <button
+                      key={`${s.departure}-${s.destination}-${s.departureDate}-${s.returnDate ?? ''}-${i}`}
+                      type="button"
+                      className="ghost-button last-search-btn"
+                      onClick={() => loadFromLastSearch(s)}
+                      disabled={flightsLoading}
+                    >
+                      {s.departure} → {s.destination} ({s.departureDate}
+                      {s.tripType === 'roundTrip' && s.returnDate ? ` / ${s.returnDate}` : ''})
+                    </button>
+                  ))}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <button
                   type="button"
@@ -996,12 +1374,16 @@ function Dashboard() {
 
           {flightsError && <div className="alert alert-error">{flightsError}</div>}
 
-          {flights.length === 0 && !flightsLoading && !flightsError && (
+          {flights.length === 0 && returnFlights.length === 0 && !flightsLoading && !flightsError && (
             <p className="muted-text">Henüz kayıtlı bir uçuş bulunmuyor.</p>
           )}
 
           {flights.length > 0 && (
-            <div className="flights-table-wrapper">
+            <div className="flights-section">
+              {tripType === 'roundTrip' && (
+                <h3 className="flights-section-title">Gidiş uçuşları ({flightSearchDeparture} → {flightSearchDestination})</h3>
+              )}
+              <div className="flights-table-wrapper">
               <table className="flights-table">
                 <thead>
                   <tr>
@@ -1080,16 +1462,85 @@ function Dashboard() {
                       <td>
                         <button
                           type="button"
-                          className="secondary-button"
+                          className={
+                            selectedFlightId === f.id && selectedFlightSeats
+                              ? 'secondary-button secondary-button-active'
+                              : 'secondary-button'
+                          }
                           onClick={() => fetchSeats(f.id)}
                         >
-                          Koltukları Gör
+                          {selectedFlightId === f.id && selectedFlightSeats
+                            ? 'Koltukları Kapat'
+                            : 'Koltukları Gör'}
                         </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+            </div>
+          )}
+
+          {returnFlights.length > 0 && (
+            <div className="flights-section" style={{ marginTop: '1.5rem' }}>
+              <h3 className="flights-section-title">Dönüş uçuşları ({flightSearchDestination} → {flightSearchDeparture})</h3>
+              <div className="flights-table-wrapper">
+                <table className="flights-table">
+                  <thead>
+                    <tr>
+                      <th>Uçuş</th>
+                      <th>Rota</th>
+                      <th>Kalkış</th>
+                      <th>Varış</th>
+                      <th>Fiyat</th>
+                      <th>Koltuk</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {returnFlights.map((f) => (
+                      <tr key={f.id} className="flight-row">
+                        <td><div className="mono">{f.flightNumber}</div></td>
+                        <td>
+                          <div className="route">
+                            <span>{f.departure}</span>
+                            <span className="route-arrow">→</span>
+                            <span>{f.destination}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="datetime">
+                            <span>{new Date(f.departureTime).toLocaleDateString('tr-TR')} </span>
+                            <span className="datetime-secondary">
+                              {new Date(f.departureTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="datetime">
+                            <span>{new Date(f.arrivalTime).toLocaleDateString('tr-TR')} </span>
+                            <span className="datetime-secondary">
+                              {new Date(f.arrivalTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        </td>
+                        <td><div className="mono">₺{f.basePrice.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</div></td>
+                        <td><div className="seats-pill">{f.totalSeats ?? f.availableSeats ?? ''}</div></td>
+                        <td>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() => fetchSeats(f.id)}
+                          >
+                            Koltukları Gör
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -1118,11 +1569,21 @@ function Dashboard() {
                     {selectedFlightSeats.totalSeatsCount}
                   </div>
                 </div>
-                <div className="seats-legend">
-                  <span className="seat-box seat-free">Boş</span>
-                  <span className="seat-box seat-reserved">Dolu</span>
-                  <span className="seat-box seat-premium">Premium</span>
-                  <span className="seat-box seat-economy">Economy</span>
+                <div className="seats-header-right">
+                  <div className="seats-legend">
+                    <span className="seats-legend-item"><i className="seats-legend-dot seats-legend-free" /> Boş</span>
+                    <span className="seats-legend-item"><i className="seats-legend-dot seats-legend-reserved" /> Dolu</span>
+                    <span className="seats-legend-item"><i className="seats-legend-dot seats-legend-premium" /> Premium</span>
+                    <span className="seats-legend-item"><i className="seats-legend-dot seats-legend-economy" /> Economy</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="seats-close-btn"
+                    onClick={closeSeats}
+                    title="Koltuk planını kapat"
+                  >
+                    Kapat
+                  </button>
                 </div>
               </div>
 
@@ -1163,7 +1624,10 @@ function Dashboard() {
                         }
 
                         return (
-                          <div className="seat-row" key={row}>
+                          <div
+                            className={`seat-row ${row === 11 ? 'seat-row-economy-start' : ''}`}
+                            key={row}
+                          >
                             <div className="seat-row-label">{row}</div>
                             <div className="seat-row-inner">
                               <div className="seat-row-cluster">
@@ -1203,21 +1667,26 @@ function Dashboard() {
                 </div>
               </div>
 
-              {activeSeatId && (
+              {selectedSeatIds.length > 0 && (
                 <div className="selected-seats-info">
                   <div>
-                    Seçili koltuk:{' '}
+                    Seçili koltuk{selectedSeatIds.length > 1 ? 'lar' : ''}:{' '}
                     <span className="mono">
-                      {
-                        selectedFlightSeats.seats.find((s) => s.id === activeSeatId)
-                          ?.seatNumber
-                      }
+                      {selectedFlightSeats.seats
+                        .filter((s) => selectedSeatIds.includes(s.id))
+                        .map((s) => s.seatNumber)
+                        .join(', ')}
                     </span>
+                    {selectedSeatIds.length < MAX_SELECTABLE_SEATS && (
+                      <span className="muted-text" style={{ marginLeft: '0.5rem' }}>
+                        (en fazla {MAX_SELECTABLE_SEATS} koltuk seçebilirsiniz)
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
 
-              {activeSeatId && (
+              {selectedSeatIds.length > 0 && (
                 <div className="reservation-card">
                   <h3 className="section-title">Yolcu Bilgileri</h3>
 
@@ -1233,12 +1702,14 @@ function Dashboard() {
                           />
                         </div>
                         <div className="form-field">
-                          <label>Koltuk</label>
+                          <label>Koltuk{selectedSeatIds.length > 1 ? 'lar' : ''}</label>
                           <input
                             type="text"
                             value={
-                              selectedFlightSeats.seats.find((s) => s.id === activeSeatId)
-                                ?.seatNumber ?? ''
+                              selectedFlightSeats.seats
+                                .filter((s) => selectedSeatIds.includes(s.id))
+                                .map((s) => s.seatNumber)
+                                .join(', ') ?? ''
                             }
                             disabled
                           />
@@ -1275,16 +1746,16 @@ function Dashboard() {
                           />
                         </div>
                         <div className="form-field">
-                          <label>Ücret</label>
+                          <label>Toplam Ücret</label>
                           <input
                             type="text"
                             disabled
                             value={
                               '₺' +
-                              (selectedFlightSeats.seats.find((s) => s.id === activeSeatId)
-                                ?.price ?? 0).toLocaleString('tr-TR', {
-                                maximumFractionDigits: 0,
-                              })
+                              selectedFlightSeats.seats
+                                .filter((s) => selectedSeatIds.includes(s.id))
+                                .reduce((sum, s) => sum + s.price, 0)
+                                .toLocaleString('tr-TR', { maximumFractionDigits: 0 })
                             }
                           />
                         </div>
@@ -1303,9 +1774,9 @@ function Dashboard() {
                     <>
                       <div className="reservation-created-banner">
                         <span className="reservation-created-text">
-                          Rezervasyon oluşturuldu.
-                          {reservationSuccess.reservationId && (
-                            <> Rezervasyon no: <span className="mono">{reservationSuccess.reservationId}</span></>
+                          {reservationSuccess.length} rezervasyon oluşturuldu.
+                          {reservationSuccess.some((r) => r.reservationId) && (
+                            <> Rezervasyon no: <span className="mono">{reservationSuccess.map((r) => r.reservationId).filter(Boolean).join(', ')}</span></>
                           )}{' '}
                           Ödemeye geçin.
                         </span>
@@ -1388,11 +1859,11 @@ function Dashboard() {
                     <div className="payment-panel">
                       <div className="payment-title">Ödeme Tamamlandı</div>
                       <div className="payment-text">
-                        {paymentResult?.message ?? reservationSuccess.message}
+                        {paymentResult?.message ?? `${reservationSuccess.length} rezervasyon için ödeme tamamlandı.`}
                       </div>
-                      {reservationSuccess.reservationId && (
+                      {reservationSuccess.some((r) => r.reservationId) && (
                         <div className="payment-text">
-                          Rezervasyon no: <span className="mono">{reservationSuccess.reservationId}</span>
+                          Rezervasyon no: <span className="mono">{reservationSuccess.map((r) => r.reservationId).filter(Boolean).join(', ')}</span>
                         </div>
                       )}
                       {paymentResult?.transactionId && (

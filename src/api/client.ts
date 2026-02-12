@@ -57,7 +57,13 @@ export async function fetchWithAuth(path: string, options: RequestInit = {}): Pr
   if (options.body != null && typeof options.body === 'string' && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'
   }
-  return fetch(url, { ...options, headers })
+  const res = await fetch(url, { ...options, headers })
+  if (res.status === 401) {
+    clearAuth()
+    window.location.replace('/login')
+    throw new Error('Oturum süresi doldu.')
+  }
+  return res
 }
 
 /** API hata cevabı: message, isteğe bağlı code, validasyon için errors */

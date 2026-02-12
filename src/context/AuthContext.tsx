@@ -61,9 +61,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const login = useCallback(async (email: string, password: string): Promise<AuthResponse> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (email.trim()) headers['X-User-Email'] = email.trim()
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ email, password }),
     })
     const text = await res.text()
@@ -89,9 +91,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       firstName: string,
       lastName: string
     ): Promise<AuthResponse | RegisterSuccessResponse> => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (email.trim()) headers['X-User-Email'] = email.trim()
       const res = await fetch(`${API_BASE}/auth/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ email, password, firstName, lastName }),
       })
       const text = await res.text()
@@ -121,9 +125,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const forgotPassword = useCallback(
     async (email: string): Promise<{ message?: string }> => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (email.trim()) headers['X-User-Email'] = email.trim()
       const res = await fetch(`${API_BASE}/auth/forgot-password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ email }),
       })
       const text = await res.text()
