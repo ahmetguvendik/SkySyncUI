@@ -6,6 +6,7 @@ import '../App.css'
 
 const FLIGHT_LIST_PAGE_SIZE = 20
 const MAX_SELECTABLE_SEATS = 3
+const PAYMENT_SUCCESS_REFRESH_DELAY_MS = 2300
 
 function normalizeFlight(f: Record<string, unknown>): {
   id: string
@@ -103,6 +104,10 @@ export default function FlightSearchResults() {
   const [paymentResult, setPaymentResult] = useState<{
     transactionId?: string
     message?: string
+  } | null>(null)
+  const [paymentToast, setPaymentToast] = useState<{
+    title: string
+    details: string
   } | null>(null)
 
   const toggleSeatSelection = (seatId: string, isReserved: boolean) => {
@@ -423,6 +428,14 @@ export default function FlightSearchResults() {
         message: `${reservationSuccess.length} rezervasyon için ödeme başarıyla tamamlandı.`,
       })
       setPaymentComplete(true)
+      const activeFlight = [...flights, ...returnFlights].find((f) => f.id === selectedFlightSeats.flightId)
+      const seatNumbers = reservationSuccess.map((r) => r.seatNumber).filter(Boolean).join(', ')
+      const route = activeFlight ? `${activeFlight.departure} → ${activeFlight.destination}` : 'Rota bilgisi yok'
+      const flightRef = activeFlight?.flightNumber || selectedFlightSeats.flightNumber
+      setPaymentToast({
+        title: 'Ödeme Başarılı',
+        details: `${flightRef} · ${route} · Koltuk: ${seatNumbers || '—'}`,
+      })
       setCardNumber('')
       setCardExpiry('')
       setCardCvv('')
@@ -440,7 +453,16 @@ export default function FlightSearchResults() {
     setReservationSuccess(null)
     setPaymentComplete(false)
     setPaymentResult(null)
+    setPaymentToast(null)
   }, [selectedSeatIds])
+
+  useEffect(() => {
+    if (!paymentToast) return
+    const timer = window.setTimeout(() => {
+      window.location.reload()
+    }, PAYMENT_SUCCESS_REFRESH_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [paymentToast])
 
   const hasParams = depFromUrl && destFromUrl && dateFromUrl
 
@@ -463,6 +485,13 @@ export default function FlightSearchResults() {
 
   return (
     <main className="app-container flight-search-page flight-results-page">
+      {paymentToast && (
+        <div className="payment-toast" role="status" aria-live="polite">
+          <div className="payment-toast-title">{paymentToast.title}</div>
+          <div className="payment-toast-details">{paymentToast.details}</div>
+          <div className="payment-toast-hint">Sayfa yenileniyor...</div>
+        </div>
+      )}
       <section className="flight-results-section">
         <div className="flight-results-header">
           <div className="flight-results-summary">

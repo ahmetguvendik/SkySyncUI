@@ -1,12 +1,16 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { fetchWithAuth } from '../api/client'
 import '../App.css'
 
 const MAX_LAST_SEARCHES = 3
 const LAST_FLIGHT_SEARCHES_KEY = 'skysync_last_flight_searches'
+const AIRPORT_SUGGESTIONS_PAGE_SIZE = 8
+const AIRPORT_SUGGESTION_DEBOUNCE_MS = 250
 
 type TripType = 'oneWay' | 'roundTrip'
 type LastSearch = { departure: string; destination: string; departureDate: string; returnDate?: string; tripType?: TripType }
+type AirportOption = { id: string; code: string; name: string; city: string; country: string }
 
 function getLastFlightSearches(): LastSearch[] {
   try {
@@ -23,6 +27,76 @@ function saveLastFlightSearches(list: LastSearch[]) {
   try {
     localStorage.setItem(LAST_FLIGHT_SEARCHES_KEY, JSON.stringify(list.slice(0, MAX_LAST_SEARCHES)))
   } catch {}
+}
+
+function normalizeAirportOption(item: Record<string, unknown>): AirportOption {
+  return {
+    id: String(item.id ?? item.Id ?? item.airportId ?? item.AirportId ?? ''),
+    code: String(item.code ?? item.Code ?? ''),
+    name: String(item.name ?? item.Name ?? ''),
+    city: String(item.city ?? item.City ?? ''),
+    country: String(item.country ?? item.Country ?? ''),
+  }
+}
+
+function extractAirportList(data: unknown): AirportOption[] {
+  if (!data || typeof data !== 'object') return []
+
+  const payload = data as Record<string, unknown>
+  const payloadData = payload.data
+  const nested =
+    payloadData && typeof payloadData === 'object' && !Array.isArray(payloadData)
+      ? (payloadData as Record<string, unknown>)
+      : null
+
+  const candidate =
+    payload.airports ??
+    payload.Airports ??
+    payload.items ??
+    payload.Items ??
+    nested?.airports ??
+    nested?.Airports ??
+    nested?.items ??
+    nested?.Items ??
+    payload.data ??
+    payload.Data ??
+    []
+
+  if (!Array.isArray(candidate)) return []
+
+  const list = candidate
+    .filter((item): item is Record<string, unknown> => item != null && typeof item === 'object')
+    .map((item) => normalizeAirportOption(item))
+    .filter((a) => a.code)
+
+  return Array.from(new Map(list.map((a) => [a.code, a])).values())
+}
+
+function resolveAirportCode(inputValue: string, options: AirportOption[]): string {
+  const value = inputValue.trim()
+  if (!value) return ''
+
+  const upper = value.toUpperCase()
+  if (/^[A-Z]{3}$/.test(upper)) return upper
+
+  const exact = options.find((a) => {
+    const code = a.code.toUpperCase()
+    const name = a.name.toUpperCase()
+    const city = a.city.toUpperCase()
+    return code === upper || name === upper || city === upper
+  })
+  if (exact) return exact.code.toUpperCase()
+
+  const matched = options.filter((a) => {
+    const code = a.code.toUpperCase()
+    const name = a.name.toUpperCase()
+    const city = a.city.toUpperCase()
+    const country = a.country.toUpperCase()
+    return code.includes(upper) || name.includes(upper) || city.includes(upper) || country.includes(upper)
+  })
+  if (matched.length === 1) return matched[0].code.toUpperCase()
+
+  return upper
 }
 
 const QUICK_BOXES = [
@@ -51,11 +125,109 @@ export default function FlightSearchForm() {
   const [flightSearchDate, setFlightSearchDate] = useState('')
   const [flightSearchReturnDate, setFlightSearchReturnDate] = useState('')
   const [lastFlightSearches, setLastFlightSearches] = useState<LastSearch[]>(() => getLastFlightSearches())
+  const [departureAirportOptions, setDepartureAirportOptions] = useState<AirportOption[]>([])
+  const [destinationAirportOptions, setDestinationAirportOptions] = useState<AirportOption[]>([])
+  const [departureSuggestionsLoading, setDepartureSuggestionsLoading] = useState(false)
+  const [destinationSuggestionsLoading, setDestinationSuggestionsLoading] = useState(false)
+  const [departureSuggestionsOpen, setDepartureSuggestionsOpen] = useState(false)
+  const [destinationSuggestionsOpen, setDestinationSuggestionsOpen] = useState(false)
+
+  const searchAirports = useCallback(async (query: string, signal?: AbortSignal): Promise<AirportOption[]> => {
+    const trimmed = query.trim()
+    if (!trimmed) return []
+
+    const params = new URLSearchParams()
+    params.set('page', '1')
+    params.set('pageSize', String(AIRPORT_SUGGESTIONS_PAGE_SIZE))
+    params.set('search', trimmed)
+    params.set('query', trimmed)
+
+    const res = await fetchWithAuth(`airport?${params.toString()}`, { signal })
+    const text = await res.text()
+    if (!res.ok) return []
+
+    let data: unknown = null
+    if (text) {
+      try {
+        data = JSON.parse(text)
+      } catch {
+        return []
+      }
+    }
+
+    const all = extractAirportList(data)
+    const upper = trimmed.toUpperCase()
+    return all
+      .filter((a) => {
+        const code = a.code.toUpperCase()
+        const name = a.name.toUpperCase()
+        const city = a.city.toUpperCase()
+        const country = a.country.toUpperCase()
+        return code.includes(upper) || name.includes(upper) || city.includes(upper) || country.includes(upper)
+      })
+      .slice(0, AIRPORT_SUGGESTIONS_PAGE_SIZE)
+  }, [])
+
+  useEffect(() => {
+    const query = flightSearchDeparture.trim()
+    if (!query) {
+      setDepartureAirportOptions([])
+      setDepartureSuggestionsLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      setDepartureSuggestionsLoading(true)
+      try {
+        const list = await searchAirports(query, controller.signal)
+        setDepartureAirportOptions(list)
+      } catch (err) {
+        const abortErr = err as { name?: string }
+        if (abortErr?.name !== 'AbortError') setDepartureAirportOptions([])
+      } finally {
+        setDepartureSuggestionsLoading(false)
+      }
+    }, AIRPORT_SUGGESTION_DEBOUNCE_MS)
+
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [flightSearchDeparture, searchAirports])
+
+  useEffect(() => {
+    const query = flightSearchDestination.trim()
+    if (!query) {
+      setDestinationAirportOptions([])
+      setDestinationSuggestionsLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      setDestinationSuggestionsLoading(true)
+      try {
+        const list = await searchAirports(query, controller.signal)
+        setDestinationAirportOptions(list)
+      } catch (err) {
+        const abortErr = err as { name?: string }
+        if (abortErr?.name !== 'AbortError') setDestinationAirportOptions([])
+      } finally {
+        setDestinationSuggestionsLoading(false)
+      }
+    }, AIRPORT_SUGGESTION_DEBOUNCE_MS)
+
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [flightSearchDestination, searchAirports])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    const dep = flightSearchDeparture.trim().toUpperCase()
-    const dest = flightSearchDestination.trim().toUpperCase()
+    const dep = resolveAirportCode(flightSearchDeparture, departureAirportOptions)
+    const dest = resolveAirportCode(flightSearchDestination, destinationAirportOptions)
     const date = flightSearchDate.trim()
     const returnDate = flightSearchReturnDate.trim()
 
@@ -145,27 +317,87 @@ export default function FlightSearchForm() {
               </button>
             </div>
           </div>
-          <div className="form-field">
-            <label htmlFor="search-departure">Kalkış (IATA)</label>
+          <div className="form-field airport-autocomplete">
+            <label htmlFor="search-departure">Kalkış (şehir veya IATA)</label>
             <input
               id="search-departure"
               type="text"
-              maxLength={3}
-              placeholder="IST"
+              autoComplete="off"
+              placeholder="İstanbul / IST"
               value={flightSearchDeparture}
-              onChange={(e) => setFlightSearchDeparture(e.target.value.toUpperCase())}
+              onFocus={() => setDepartureSuggestionsOpen(true)}
+              onBlur={() => window.setTimeout(() => setDepartureSuggestionsOpen(false), 120)}
+              onChange={(e) => setFlightSearchDeparture(e.target.value)}
             />
+            {departureSuggestionsOpen && flightSearchDeparture.trim().length > 0 && (
+              <div className="airport-suggestions">
+                {departureSuggestionsLoading && <div className="airport-suggestion-state">Havalimanları aranıyor...</div>}
+                {!departureSuggestionsLoading && departureAirportOptions.length === 0 && (
+                  <div className="airport-suggestion-state">Sonuç bulunamadı</div>
+                )}
+                {!departureSuggestionsLoading &&
+                  departureAirportOptions.map((airport) => (
+                    <button
+                      key={`dep-${airport.id || airport.code}`}
+                      type="button"
+                      className="airport-suggestion-item"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        setFlightSearchDeparture(airport.code.toUpperCase())
+                        setDepartureAirportOptions([])
+                        setDepartureSuggestionsOpen(false)
+                      }}
+                    >
+                      <span className="airport-suggestion-code">{airport.code}</span>
+                      <span className="airport-suggestion-name">{airport.name || airport.city}</span>
+                      <span className="airport-suggestion-meta">
+                        {[airport.city, airport.country].filter(Boolean).join(', ')}
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
-          <div className="form-field">
-            <label htmlFor="search-destination">Varış (IATA)</label>
+          <div className="form-field airport-autocomplete">
+            <label htmlFor="search-destination">Varış (şehir veya IATA)</label>
             <input
               id="search-destination"
               type="text"
-              maxLength={3}
-              placeholder="AMS"
+              autoComplete="off"
+              placeholder="Amsterdam / AMS"
               value={flightSearchDestination}
-              onChange={(e) => setFlightSearchDestination(e.target.value.toUpperCase())}
+              onFocus={() => setDestinationSuggestionsOpen(true)}
+              onBlur={() => window.setTimeout(() => setDestinationSuggestionsOpen(false), 120)}
+              onChange={(e) => setFlightSearchDestination(e.target.value)}
             />
+            {destinationSuggestionsOpen && flightSearchDestination.trim().length > 0 && (
+              <div className="airport-suggestions">
+                {destinationSuggestionsLoading && <div className="airport-suggestion-state">Havalimanları aranıyor...</div>}
+                {!destinationSuggestionsLoading && destinationAirportOptions.length === 0 && (
+                  <div className="airport-suggestion-state">Sonuç bulunamadı</div>
+                )}
+                {!destinationSuggestionsLoading &&
+                  destinationAirportOptions.map((airport) => (
+                    <button
+                      key={`dest-${airport.id || airport.code}`}
+                      type="button"
+                      className="airport-suggestion-item"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        setFlightSearchDestination(airport.code.toUpperCase())
+                        setDestinationAirportOptions([])
+                        setDestinationSuggestionsOpen(false)
+                      }}
+                    >
+                      <span className="airport-suggestion-code">{airport.code}</span>
+                      <span className="airport-suggestion-name">{airport.name || airport.city}</span>
+                      <span className="airport-suggestion-meta">
+                        {[airport.city, airport.country].filter(Boolean).join(', ')}
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
           <div className="form-field">
             <label htmlFor="search-date">Gidiş Tarihi</label>

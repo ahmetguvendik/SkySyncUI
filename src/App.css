@@ -1018,6 +1018,72 @@
   padding: 0.65rem 1rem;
 }
 
+.airport-autocomplete {
+  position: relative;
+}
+
+.airport-suggestions {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  background: #ffffff;
+  border: 1px solid #dbe4ef;
+  border-radius: 0.75rem;
+  box-shadow: 0 18px 32px rgba(15, 23, 42, 0.12);
+}
+
+.airport-suggestion-state {
+  padding: 0.7rem 0.8rem;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.airport-suggestion-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.55rem;
+  align-items: center;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: #1e293b;
+  text-align: left;
+  padding: 0.45rem 0.55rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.airport-suggestion-item:hover {
+  background: #f8fafc;
+  border-color: #dbe4ef;
+}
+
+.airport-suggestion-code {
+  grid-row: 1 / 3;
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  color: #0f172a;
+  min-width: 2.6rem;
+}
+
+.airport-suggestion-name {
+  font-size: 0.85rem;
+  color: #0f172a;
+  font-weight: 500;
+}
+
+.airport-suggestion-meta {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
 .hero-search-box .flight-search-form {
   max-width: 100%;
 }
@@ -1160,8 +1226,43 @@
 }
 
 .reservation-status {
-  font-size: 0.85rem;
-  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5.75rem;
+  padding: 0.28rem 0.62rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.reservation-status-positive {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #86efac;
+}
+
+.reservation-status-pending {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+.reservation-status-negative {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.reservation-status-neutral {
+  background: #eef2ff;
+  color: #3730a3;
+  border-color: #c7d2fe;
 }
 
 .reservation-card {
@@ -1233,6 +1334,48 @@
 .payment-text {
   font-size: 0.9rem;
   margin-bottom: 0.25rem;
+}
+
+.payment-toast {
+  position: fixed;
+  top: 86px;
+  right: 20px;
+  z-index: 300;
+  min-width: 290px;
+  max-width: 460px;
+  padding: 0.85rem 1rem;
+  border-radius: 0.85rem;
+  border: 1px solid #6ee7b7;
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  box-shadow: 0 18px 34px rgba(5, 150, 105, 0.24);
+  color: #065f46;
+}
+
+.payment-toast-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.payment-toast-details {
+  margin-top: 0.25rem;
+  font-size: 0.83rem;
+  color: #047857;
+}
+
+.payment-toast-hint {
+  margin-top: 0.35rem;
+  font-size: 0.76rem;
+  color: #0f766e;
+}
+
+@media (max-width: 640px) {
+  .payment-toast {
+    right: 12px;
+    left: 12px;
+    min-width: 0;
+    max-width: none;
+    top: 80px;
+  }
 }
 
 /* Flight search page - genişletilmiş layout */
@@ -1650,6 +1793,79 @@
   border-radius: 0.75rem;
   padding: 1.25rem;
   box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
+}
+
+.reservations-table-modern {
+  margin-top: 1.1rem;
+  border-radius: 0.9rem;
+  border: 1px solid #dbe4ef;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+}
+
+.reservations-table-modern-table {
+  font-size: 0.84rem;
+}
+
+.reservations-table-modern-table th {
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #dbe4ef;
+}
+
+.reservations-table-modern-table td {
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+
+.reservation-row:hover {
+  background: linear-gradient(90deg, rgba(249, 250, 251, 1) 0%, rgba(241, 245, 249, 1) 100%);
+}
+
+.reservation-flight-number {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.reservation-route {
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.reservation-seat-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.5rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+}
+
+.reservation-passenger {
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+}
+
+.reservation-passenger-name {
+  color: #0f172a;
+  font-weight: 500;
+}
+
+.reservation-passenger-email {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.reservation-price {
+  color: #ea580c;
+  font-weight: 700;
 }
 
 /* Footer - ucuzabilet FAQ tarzı */

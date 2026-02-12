@@ -8,7 +8,12 @@ export default function MainLayout() {
   const path = location.pathname
 
   const isFlightSearch = path === '/ucus-ara' || path === '/ucus-sonuclari'
-  const showQuickActions = path !== '/ucus-ara' && path !== '/ucus-sonuclari'
+  const showQuickActions =
+    path !== '/ucus-ara' &&
+    path !== '/ucus-sonuclari' &&
+    path !== '/ucus-ekle' &&
+    path !== '/rezervasyonlar' &&
+    path !== '/havalimanlari'
 
   return (
     <div className={`app-root ${isFlightSearch ? 'flight-search-active' : ''}`}>
