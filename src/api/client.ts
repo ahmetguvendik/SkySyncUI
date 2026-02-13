@@ -94,4 +94,174 @@ export function getErrorMessageFromResponse(
   return msg
 }
 
+/** Kullanıcı profil bilgisi: GET auth/profile */
+export type ProfileData = {
+  id: string
+  email: string
+  firstName: string
+  lastName: string
+  role: string
+}
+
+export async function fetchProfile(): Promise<ProfileData> {
+  const res = await fetchWithAuth('auth/profile')
+  const text = await res.text()
+  if (!res.ok) throw new Error(getErrorMessageFromResponse(
+    text ? (() => { try { return JSON.parse(text) } catch { return null } })() : null,
+    'Profil yüklenemedi.'
+  ))
+  let data: Record<string, unknown> = {}
+  if (text) {
+    try {
+      data = JSON.parse(text) as Record<string, unknown>
+    } catch {
+      throw new Error('Profil yanıtı okunamadı.')
+    }
+  }
+  return {
+    id: String(data.id ?? data.Id ?? ''),
+    email: String(data.email ?? data.Email ?? ''),
+    firstName: String(data.firstName ?? data.FirstName ?? data.first_name ?? ''),
+    lastName: String(data.lastName ?? data.LastName ?? data.last_name ?? ''),
+    role: String(data.role ?? data.Role ?? ''),
+  }
+}
+
+/** Profil güncelleme: PUT auth/profile */
+export async function updateProfile(data: {
+  firstName: string
+  lastName: string
+  email: string
+}): Promise<{ message?: string }> {
+  const res = await fetchWithAuth('auth/profile', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+  const text = await res.text()
+  let parsed: ApiErrorBody & { message?: string } | null = null
+  if (text) {
+    try {
+      parsed = JSON.parse(text) as ApiErrorBody & { message?: string }
+    } catch {
+      throw new Error('Profil yanıtı okunamadı.')
+    }
+  }
+  if (!res.ok) throw new Error(getErrorMessageFromResponse(parsed, 'Profil güncellenemedi.'))
+  return { message: parsed?.message }
+}
+
+/** Profil şifre güncelleme: POST auth/change-password */
+export async function changePassword(data: {
+  currentPassword: string
+  newPassword: string
+}): Promise<{ message?: string }> {
+  const res = await fetchWithAuth('auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+  const text = await res.text()
+  let parsed: ApiErrorBody & { message?: string } | null = null
+  if (text) {
+    try {
+      parsed = JSON.parse(text) as ApiErrorBody & { message?: string }
+    } catch {
+      throw new Error('Şifre yanıtı okunamadı.')
+    }
+  }
+  if (!res.ok) throw new Error(getErrorMessageFromResponse(parsed, 'Şifre güncellenemedi.'))
+  return { message: parsed?.message }
+}
+
+/** Sistemdeki kullanıcıları listele: GET auth/users */
+export type SystemUser = {
+  id: string
+  email: string
+  firstName: string
+  lastName: string
+  role: string
+  isEmailConfirmed?: boolean
+  createdTime?: string
+  [key: string]: unknown
+}
+
+export type UsersResponse = {
+  items: SystemUser[]
+  page: number
+  pageSize: number
+  totalCount: number
+  totalPages: number
+}
+
+export async function fetchUsers(params?: {
+  page?: number
+  pageSize?: number
+}): Promise<UsersResponse> {
+  const searchParams = new URLSearchParams()
+  const page = params?.page && params.page > 0 ? params.page : 1
+  const pageSize = params?.pageSize && params.pageSize >= 1 && params.pageSize <= 100 ? params.pageSize : 10
+  searchParams.set('page', String(page))
+  searchParams.set('pageSize', String(pageSize))
+  const res = await fetchWithAuth(`auth/users?${searchParams.toString()}`)
+  const text = await res.text()
+  let data: ApiErrorBody & UsersResponse | null = null
+  if (text) {
+    try {
+      data = JSON.parse(text) as ApiErrorBody & UsersResponse
+    } catch {
+      throw new Error('Kullanıcı listesi yanıtı okunamadı.')
+    }
+  }
+  if (!res.ok) {
+    throw new Error(getErrorMessageFromResponse(data, 'Kullanıcılar yüklenemedi.'))
+  }
+  const normalizedItems = Array.isArray(data?.items)
+    ? data.items.map((item) => {
+        const base = { ...(item as Record<string, unknown>) }
+        return {
+          ...base,
+          id: String(base.id ?? ''),
+          email: String(base.email ?? ''),
+          firstName: String(base.firstName ?? ''),
+          lastName: String(base.lastName ?? ''),
+          role: String(base.role ?? ''),
+          isEmailConfirmed: typeof base.isEmailConfirmed === 'boolean' ? base.isEmailConfirmed : undefined,
+          createdTime: typeof base.createdTime === 'string' ? base.createdTime : undefined,
+        }
+      })
+    : []
+  return {
+    items: normalizedItems,
+    page: data?.page ?? page,
+    pageSize: data?.pageSize ?? pageSize,
+    totalCount: data?.totalCount ?? normalizedItems.length,
+    totalPages: data?.totalPages ?? 1,
+  }
+}
+
+/** Admin kullanıcı ekleme: POST Auth/register/admin (backend 5050, v1.0) */
+const ADMIN_REGISTER_URL = 'http://localhost:5050/api/v1.0/Auth/register/admin'
+
+export async function adminRegisterUser(data: {
+  email: string
+  password: string
+  firstName: string
+  lastName: string
+}): Promise<{ message?: string }> {
+  const res = await fetchWithAuth(ADMIN_REGISTER_URL, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+  const text = await res.text()
+  let parsed: ApiErrorBody & { message?: string } | null = null
+  if (text) {
+    try {
+      parsed = JSON.parse(text) as ApiErrorBody & { message?: string }
+    } catch {
+      //
+    }
+  }
+  if (!res.ok) throw new Error(getErrorMessageFromResponse(parsed, 'Kullanıcı eklenemedi.'))
+  return parsed ?? {}
+}
+
 export { API_BASE, getStoredToken as getToken }

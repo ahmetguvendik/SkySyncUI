@@ -6,6 +6,7 @@ export default function MainLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const path = location.pathname
+  const isAdmin = user?.role === 'Admin'
 
   const isFlightSearch = path === '/ucus-ara' || path === '/ucus-sonuclari'
   const showQuickActions =
@@ -13,7 +14,10 @@ export default function MainLayout() {
     path !== '/ucus-sonuclari' &&
     path !== '/ucus-ekle' &&
     path !== '/rezervasyonlar' &&
-    path !== '/havalimanlari'
+    path !== '/havalimanlari' &&
+    path !== '/kullanici-ekle' &&
+    path !== '/kullanicilar' &&
+    path !== '/profil'
 
   return (
     <div className={`app-root ${isFlightSearch ? 'flight-search-active' : ''}`}>
@@ -33,12 +37,14 @@ export default function MainLayout() {
             >
               Uçuş Ara
             </Link>
-            <Link
-              to="/ucus-ekle"
-              className={`app-nav-btn ${path === '/ucus-ekle' ? 'active' : ''}`}
-            >
-              Uçuş Ekle
-            </Link>
+            {isAdmin && (
+              <Link
+                to="/ucus-ekle"
+                className={`app-nav-btn ${path === '/ucus-ekle' ? 'active' : ''}`}
+              >
+                Uçuş Ekle
+              </Link>
+            )}
             <Link
               to="/rezervasyonlar"
               className={`app-nav-btn ${path === '/rezervasyonlar' ? 'active' : ''}`}
@@ -46,17 +52,41 @@ export default function MainLayout() {
               Rezervasyonlarım
             </Link>
             <Link
-              to="/havalimanlari"
-              className={`app-nav-btn ${path === '/havalimanlari' ? 'active' : ''}`}
+              to="/profil"
+              className={`app-nav-btn ${path === '/profil' ? 'active' : ''}`}
             >
-              Havalimanları
+              Profilim
             </Link>
+            {isAdmin && (
+              <Link
+                to="/havalimanlari"
+                className={`app-nav-btn ${path === '/havalimanlari' ? 'active' : ''}`}
+              >
+                Havalimanları
+              </Link>
+            )}
+            {isAdmin && (
+              <Link
+                to="/kullanici-ekle"
+                className={`app-nav-btn ${path === '/kullanici-ekle' ? 'active' : ''}`}
+              >
+                Kullanıcı Ekle
+              </Link>
+            )}
+            {isAdmin && (
+              <Link
+                to="/kullanicilar"
+                className={`app-nav-btn ${path === '/kullanicilar' ? 'active' : ''}`}
+              >
+                Kullanıcılar
+              </Link>
+            )}
           </nav>
           <div className="app-topbar-right">
             {user && (
-              <span className="app-user">
+              <Link to="/profil" className="app-user app-user-link">
                 {user.firstName} {user.lastName}
-              </span>
+              </Link>
             )}
             <button
               type="button"
@@ -88,21 +118,49 @@ export default function MainLayout() {
           <span className="quick-action-desc">Biletlerinize kolayca ulaşın</span>
         </Link>
         <Link
-          to="/ucus-ekle"
-          className={`quick-action-card ${path === '/ucus-ekle' ? 'active' : ''}`}
+          to="/profil"
+          className={`quick-action-card ${path === '/profil' ? 'active' : ''}`}
         >
-          <span className="quick-action-icon">➕</span>
-          <span className="quick-action-title">Uçuş Ekle</span>
-          <span className="quick-action-desc">Yeni uçuş planı oluşturun</span>
+          <span className="quick-action-icon">👤</span>
+          <span className="quick-action-title">Profilim</span>
+          <span className="quick-action-desc">Hesap bilgilerinizi görüntüleyin</span>
         </Link>
-        <Link
-          to="/havalimanlari"
-          className={`quick-action-card ${path === '/havalimanlari' ? 'active' : ''}`}
-        >
-          <span className="quick-action-icon">🏢</span>
-          <span className="quick-action-title">Havalimanları</span>
-          <span className="quick-action-desc">Havalimanı listesi ve ekleme</span>
-        </Link>
+        {isAdmin && (
+          <>
+            <Link
+              to="/ucus-ekle"
+              className={`quick-action-card ${path === '/ucus-ekle' ? 'active' : ''}`}
+            >
+              <span className="quick-action-icon">➕</span>
+              <span className="quick-action-title">Uçuş Ekle</span>
+              <span className="quick-action-desc">Yeni uçuş planı oluşturun</span>
+            </Link>
+            <Link
+              to="/havalimanlari"
+              className={`quick-action-card ${path === '/havalimanlari' ? 'active' : ''}`}
+            >
+              <span className="quick-action-icon">🏢</span>
+              <span className="quick-action-title">Havalimanları</span>
+              <span className="quick-action-desc">Havalimanı listesi ve ekleme</span>
+            </Link>
+            <Link
+              to="/kullanici-ekle"
+              className={`quick-action-card ${path === '/kullanici-ekle' ? 'active' : ''}`}
+            >
+              <span className="quick-action-icon">👤</span>
+              <span className="quick-action-title">Kullanıcı Ekle</span>
+              <span className="quick-action-desc">Yeni kullanıcı hesabı oluşturun</span>
+            </Link>
+            <Link
+              to="/kullanicilar"
+              className={`quick-action-card ${path === '/kullanicilar' ? 'active' : ''}`}
+            >
+              <span className="quick-action-icon">👥</span>
+              <span className="quick-action-title">Kullanıcılar</span>
+              <span className="quick-action-desc">Sistemdeki tüm kullanıcıları görüntüleyin</span>
+            </Link>
+          </>
+        )}
       </div>
       )}
 

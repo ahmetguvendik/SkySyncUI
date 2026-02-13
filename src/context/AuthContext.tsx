@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { AuthUser, AuthResponse, ApiErrorBody } from '../api/client'
-import { API_BASE, clearAuth, setAuth, getToken, getErrorMessageFromResponse } from '../api/client'
+import { API_BASE, clearAuth, setAuth, getToken, getErrorMessageFromResponse, fetchProfile } from '../api/client'
 
 const AUTH_USER_KEY = 'skysync_user'
 
@@ -19,6 +19,8 @@ export type RegisterSuccessResponse = {
 
 type AuthContextValue = AuthState & {
   login: (email: string, password: string) => Promise<AuthResponse>
+  /** Profil endpoint'inden güncel veriyi çekip state'i günceller */
+  refreshProfile: () => Promise<void>
   register: (
     email: string,
     password: string,
@@ -178,9 +180,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState({ token: null, user: null, isReady: true })
   }, [])
 
+  const refreshProfile = useCallback(async () => {
+    const token = getToken()
+    if (!token) return
+    const profile = await fetchProfile()
+    const updated: AuthUser = {
+      id: profile.id,
+      email: profile.email,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      role: profile.role,
+    }
+    setAuth(token, updated)
+    setState((s) => ({ ...s, user: updated }))
+  }, [])
+
   const value: AuthContextValue = {
     ...state,
     login,
+    refreshProfile,
     register,
     logout,
     forgotPassword,

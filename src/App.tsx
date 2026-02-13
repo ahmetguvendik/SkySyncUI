@@ -7,6 +7,9 @@ import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import VerifyEmail from './pages/VerifyEmail'
+import AdminUserAdd from './pages/AdminUserAdd'
+import AdminUsersList from './pages/AdminUsersList'
+import Profile from './pages/Profile'
 import FlightSearchForm from './pages/FlightSearchForm'
 import FlightSearchResults from './pages/FlightSearch'
 import MainLayout from './layouts/MainLayout'
@@ -1036,6 +1039,12 @@ function Dashboard() {
   )
 }
 
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth()
+  if (user?.role !== 'Admin') return <Navigate to="/ucus-ara" replace />
+  return <>{children}</>
+}
+
 function App() {
   const { token, isReady } = useAuth()
   if (!isReady) return null
@@ -1050,9 +1059,12 @@ function App() {
         <Route index element={<Navigate to="/ucus-ara" replace />} />
         <Route path="ucus-ara" element={<FlightSearchForm />} />
         <Route path="ucus-sonuclari" element={<FlightSearchResults />} />
-        <Route path="ucus-ekle" element={<Dashboard />} />
+        <Route path="ucus-ekle" element={<RequireAdmin><Dashboard /></RequireAdmin>} />
         <Route path="rezervasyonlar" element={<Dashboard />} />
-        <Route path="havalimanlari" element={<Dashboard />} />
+        <Route path="havalimanlari" element={<RequireAdmin><Dashboard /></RequireAdmin>} />
+        <Route path="kullanici-ekle" element={<RequireAdmin><AdminUserAdd /></RequireAdmin>} />
+        <Route path="kullanicilar" element={<RequireAdmin><AdminUsersList /></RequireAdmin>} />
+        <Route path="profil" element={<Profile />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

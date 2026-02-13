@@ -10,9 +10,8 @@ export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(
+  const successMessage =
     (location.state as { message?: string } | null)?.message ?? null
-  )
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
