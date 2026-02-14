@@ -10,7 +10,6 @@ export default function Profile() {
   const [editing, setEditing] = useState(false)
   const [editFirstName, setEditFirstName] = useState(user?.firstName ?? '')
   const [editLastName, setEditLastName] = useState(user?.lastName ?? '')
-  const [editEmail, setEditEmail] = useState(user?.email ?? '')
   const [editLoading, setEditLoading] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
   const [editSuccess, setEditSuccess] = useState<string | null>(null)
@@ -24,7 +23,6 @@ export default function Profile() {
   React.useEffect(() => {
     setEditFirstName(user?.firstName ?? '')
     setEditLastName(user?.lastName ?? '')
-    setEditEmail(user?.email ?? '')
   }, [user])
 
   React.useEffect(() => {
@@ -60,7 +58,7 @@ export default function Profile() {
     e.preventDefault()
     setEditError(null)
     setEditSuccess(null)
-    if (!editFirstName.trim() || !editLastName.trim() || !editEmail.trim()) {
+    if (!editFirstName.trim() || !editLastName.trim()) {
       setEditError('Tüm alanları doldurun.')
       return
     }
@@ -69,7 +67,6 @@ export default function Profile() {
       const result = await updateProfile({
         firstName: editFirstName.trim(),
         lastName: editLastName.trim(),
-        email: editEmail.trim(),
       })
       await refreshProfile()
       setEditSuccess(result.message ?? 'Profiliniz güncellendi.')
@@ -85,7 +82,6 @@ export default function Profile() {
     setEditing(false)
     setEditFirstName(user?.firstName ?? '')
     setEditLastName(user?.lastName ?? '')
-    setEditEmail(user?.email ?? '')
     setEditError(null)
     setEditSuccess(null)
     setCurrentPassword('')
@@ -235,6 +231,9 @@ export default function Profile() {
           {editing && (
             <div className="profile-edit-forms">
               <form className="profile-edit-form form-grid" onSubmit={handleEditSubmit}>
+                <p className="profile-edit-note">
+                  Güvenlik nedeniyle yalnızca ad ve soyad bilgileriniz güncellenebilir; e-posta değişikliği desteklenmez.
+                </p>
                 <div className="form-row">
                   <div className="form-field">
                     <label htmlFor="profile-edit-firstName">Ad</label>
@@ -258,17 +257,6 @@ export default function Profile() {
                       autoComplete="family-name"
                     />
                   </div>
-                </div>
-                <div className="form-field">
-                  <label htmlFor="profile-edit-email">E-posta</label>
-                  <input
-                    id="profile-edit-email"
-                    type="email"
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                    placeholder="ornek@email.com"
-                    autoComplete="email"
-                  />
                 </div>
                 {editError && <div className="alert alert-error">{editError}</div>}
                 {editSuccess && <div className="alert alert-success">{editSuccess}</div>}

@@ -15,7 +15,7 @@ import FlightSearchResults from './pages/FlightSearch'
 import MainLayout from './layouts/MainLayout'
 import './App.css'
 
-const AIRPORTS_PAGE_SIZE = 20
+const AIRPORTS_PAGE_SIZE = 10
 const RESERVATIONS_PAGE_SIZE = 20
 const AIRPORT_AUTOCOMPLETE_PAGE_SIZE = 8
 const AIRPORT_AUTOCOMPLETE_DEBOUNCE_MS = 250
@@ -96,6 +96,15 @@ function resolveAirportCodeFromInput(inputValue: string, options: AirportSuggest
   if (matched.length === 1) return matched[0].code.toUpperCase()
 
   return upper
+}
+
+function parseNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
 }
 
 function Dashboard() {
@@ -468,7 +477,7 @@ function Dashboard() {
       const list = raw.map((item) => {
         const a = item as Record<string, unknown>
         return {
-          id: String(a.id ?? a.Id ?? ''),
+          id: String(a.id ?? a.Id ?? a.airportId ?? a.AirportId ?? ''),
           code: String(a.code ?? a.Code ?? ''),
           name: String(a.name ?? a.Name ?? ''),
           city: String(a.city ?? a.City ?? ''),
@@ -478,16 +487,51 @@ function Dashboard() {
       setAirports(list)
 
       const metaSource = nested ?? payload
-      const totalPagesCandidate = Number(
-        metaSource?.totalPages ??
-        metaSource?.TotalPages ??
-        metaSource?.pageCount ??
-        metaSource?.PageCount,
+      const totalCount = parseNumber(
+        metaSource?.totalCount ??
+        metaSource?.TotalCount ??
+        payload?.totalCount ??
+        payload?.TotalCount,
       )
-      const hasNextCandidate = metaSource?.hasNextPage ?? metaSource?.HasNextPage ?? metaSource?.hasNext ?? metaSource?.HasNext
-      setAirportsTotalPages(Number.isFinite(totalPagesCandidate) && totalPagesCandidate > 0 ? totalPagesCandidate : null)
-      setAirportsHasNextPage(typeof hasNextCandidate === 'boolean' ? hasNextCandidate : null)
-      if (page > 1 && list.length === 0) {
+      const pageSizeFromResponse =
+        parseNumber(metaSource?.pageSize ?? metaSource?.PageSize ?? payload?.pageSize ?? payload?.PageSize) ??
+        AIRPORTS_PAGE_SIZE
+      const currentPageFromResponse =
+        parseNumber(metaSource?.page ?? metaSource?.Page ?? payload?.page ?? payload?.Page) ?? page
+
+      let totalPages =
+        parseNumber(
+          metaSource?.totalPages ??
+          metaSource?.TotalPages ??
+          metaSource?.pageCount ??
+          metaSource?.PageCount ??
+          payload?.totalPages ??
+          payload?.TotalPages ??
+          payload?.pageCount ??
+          payload?.PageCount,
+        ) ?? null
+      if ((totalPages == null || totalPages <= 0) && totalCount != null && pageSizeFromResponse > 0) {
+        totalPages = Math.max(1, Math.ceil(totalCount / pageSizeFromResponse))
+      }
+      if (totalPages != null && totalPages <= 0) totalPages = null
+
+      const hasNextCandidate =
+        metaSource?.hasNextPage ??
+        metaSource?.HasNextPage ??
+        metaSource?.hasNext ??
+        metaSource?.HasNext ??
+        payload?.hasNextPage ??
+        payload?.HasNextPage ??
+        payload?.hasNext ??
+        payload?.HasNext
+      let hasNext: boolean | null = typeof hasNextCandidate === 'boolean' ? hasNextCandidate : null
+      if (hasNext == null && totalPages != null && currentPageFromResponse != null) {
+        hasNext = currentPageFromResponse < totalPages
+      }
+
+      setAirportsTotalPages(totalPages)
+      setAirportsHasNextPage(hasNext)
+      if (page > 1 && list.length === 0 && totalPages != null && page > totalPages) {
         setAirportsPage((prev) => Math.max(1, prev - 1))
         return
       }
@@ -908,14 +952,12 @@ function Dashboard() {
                     if (airportsLoading) return
                     if (airportsTotalPages != null && airportsPage >= airportsTotalPages) return
                     if (airportsHasNextPage === false) return
-                    if (airportsTotalPages == null && airportsHasNextPage == null && airports.length < AIRPORTS_PAGE_SIZE) return
                     setAirportsPage((prev) => prev + 1)
                   }}
                   disabled={
                     airportsLoading ||
                     (airportsTotalPages != null && airportsPage >= airportsTotalPages) ||
-                    airportsHasNextPage === false ||
-                    (airportsTotalPages == null && airportsHasNextPage == null && airports.length < AIRPORTS_PAGE_SIZE)
+                    airportsHasNextPage === false
                   }
                 >
                   Sonraki

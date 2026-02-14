@@ -164,27 +164,71 @@ export default function MainLayout() {
       </div>
       )}
 
-      {path !== '/ucus-ara' && (
-      <div className={`info-cards ${!showQuickActions ? 'info-cards-spaced' : ''}`}>
-        <div className="info-card">
-          <span className="info-card-badge">%50</span>
-          <span className="info-card-title">Premium Koltuk</span>
-          <span className="info-card-desc">Ön sıralarda konforlu seyahat</span>
-        </div>
-        <div className="info-card">
-          <span className="info-card-badge">3</span>
-          <span className="info-card-title">Koltuk Seçimi</span>
-          <span className="info-card-desc">Tek seferde en fazla 3 koltuk</span>
-        </div>
-        <div className="info-card">
-          <span className="info-card-badge">∞</span>
-          <span className="info-card-title">Rota Seçeneği</span>
-          <span className="info-card-desc">Tüm havalimanları arası uçuş</span>
-        </div>
-      </div>
-      )}
+      <main className="layout-content">
+        <Outlet />
+      </main>
 
-      <Outlet />
+      <div className="layout-bottom">
+        {path !== '/ucus-ara' && (
+        <div className={`info-cards info-cards-bottom ${!showQuickActions ? 'info-cards-spaced' : ''}`}>
+          <div className="info-card">
+            <span className="info-card-badge">%50</span>
+            <span className="info-card-title">Premium Koltuk</span>
+            <span className="info-card-desc">Ön sıralarda konforlu seyahat</span>
+          </div>
+          <div className="info-card">
+            <span className="info-card-badge">3</span>
+            <span className="info-card-title">Koltuk Seçimi</span>
+            <span className="info-card-desc">Tek seferde en fazla 3 koltuk</span>
+          </div>
+          <div className="info-card">
+            <span className="info-card-badge">∞</span>
+            <span className="info-card-title">Rota Seçeneği</span>
+            <span className="info-card-desc">Tüm havalimanları arası uçuş</span>
+          </div>
+        </div>
+        )}
+
+        <footer className="main-footer">
+          <div className="main-footer-top">
+            <div className="main-footer-brand">
+              <h3>
+                <span className="app-logo-icon">✦</span>
+                SkySync
+              </h3>
+              <p>Kurumsal uçuş operasyonlarınıza hız katın, rezervasyon ve müşteri deneyimini tek panelden yönetin.</p>
+            </div>
+            <div className="main-footer-columns">
+              <div className="main-footer-col">
+                <h4>Ürün</h4>
+                <Link to="/ucus-ara">Uçuş Ara</Link>
+                <Link to="/rezervasyonlar">Rezervasyonlarım</Link>
+                <Link to="/profil">Profilim</Link>
+              </div>
+              <div className="main-footer-col">
+                <h4>Çözümler</h4>
+                <span>Kurumsal Seyahat</span>
+                <span>Havalimanı Yönetimi</span>
+                <span>Operasyon İzleme</span>
+              </div>
+              <div className="main-footer-col">
+                <h4>Destek</h4>
+                <a href="mailto:destek@skysync.com">destek@skysync.com</a>
+                <a href="tel:+908508801234">+90 850 880 12 34</a>
+                <span>07:00 - 23:00 Canlı Destek</span>
+              </div>
+            </div>
+          </div>
+          <div className="main-footer-bottom">
+            <p>© {new Date().getFullYear()} SkySync. Tüm hakları saklıdır.</p>
+            <div className="main-footer-bottom-links">
+              <a href="#">Gizlilik</a>
+              <a href="#">Kullanım Şartları</a>
+              <a href="#">Çerez Politikası</a>
+            </div>
+          </div>
+        </footer>
+      </div>
     </div>
   )
 }

@@ -131,7 +131,6 @@ export async function fetchProfile(): Promise<ProfileData> {
 export async function updateProfile(data: {
   firstName: string
   lastName: string
-  email: string
 }): Promise<{ message?: string }> {
   const res = await fetchWithAuth('auth/profile', {
     method: 'PUT',

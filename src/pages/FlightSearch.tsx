@@ -7,6 +7,7 @@ import '../App.css'
 const FLIGHT_LIST_PAGE_SIZE = 20
 const MAX_SELECTABLE_SEATS = 3
 const PAYMENT_SUCCESS_REFRESH_DELAY_MS = 2300
+const PAST_FLIGHT_REFRESH_INTERVAL_MS = 60_000
 
 function normalizeFlight(f: Record<string, unknown>): {
   id: string
@@ -109,6 +110,38 @@ export default function FlightSearchResults() {
     title: string
     details: string
   } | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), PAST_FLIGHT_REFRESH_INTERVAL_MS)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const isDeparturePast = useCallback(
+    (departureTime: string): boolean => {
+      if (!departureTime) return false
+      const timestamp = new Date(departureTime).getTime()
+      if (!Number.isFinite(timestamp)) return false
+      return timestamp <= now
+    },
+    [now],
+  )
+
+  const findFlightMeta = useCallback(
+    (flightId: string) => {
+      return flights.find((f) => f.id === flightId) ?? returnFlights.find((f) => f.id === flightId) ?? null
+    },
+    [flights, returnFlights],
+  )
+
+  const isFlightPastById = useCallback(
+    (flightId: string) => {
+      const meta = findFlightMeta(flightId)
+      if (!meta) return false
+      return isDeparturePast(meta.departureTime)
+    },
+    [findFlightMeta, isDeparturePast],
+  )
 
   const toggleSeatSelection = (seatId: string, isReserved: boolean) => {
     if (isReserved || !selectedFlightSeats) return
@@ -225,6 +258,11 @@ export default function FlightSearchResults() {
       closeSeats()
       return
     }
+    if (isFlightPastById(flightId)) {
+      setSeatsError('Bu uçuşun kalkış saati geçtiği için yeni rezervasyon yapılamaz.')
+      setSelectedFlightId(null)
+      return
+    }
     try {
       setSeatsLoading(true)
       setSeatsError(null)
@@ -263,6 +301,11 @@ export default function FlightSearchResults() {
   const handleReservationSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedFlightSeats || selectedSeatIds.length === 0) return
+
+    if (isFlightPastById(selectedFlightSeats.flightId)) {
+      setReservationError('Bu uçuşun kalkış saati geçtiği için rezervasyon tamamlanamaz.')
+      return
+    }
 
     const seatsToReserve = selectedFlightSeats.seats.filter((s) => selectedSeatIds.includes(s.id))
     if (seatsToReserve.length === 0) return
@@ -598,7 +641,13 @@ export default function FlightSearchResults() {
                   {flights.map((f) => (
                     <tr
                       key={f.id}
-                      className={selectedFlightId === f.id ? 'flight-row active' : 'flight-row'}
+                      className={[
+                        'flight-row',
+                        selectedFlightId === f.id ? 'active' : '',
+                        isDeparturePast(f.departureTime) ? 'flight-row-disabled' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
                     >
                       <td><div className="mono">{f.flightNumber}</div></td>
                       <td>
@@ -614,6 +663,9 @@ export default function FlightSearchResults() {
                           <span className="datetime-secondary">
                             {new Date(f.departureTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
                           </span>
+                          {isDeparturePast(f.departureTime) && (
+                            <span className="flight-past-badge">Kalkış geçti</span>
+                          )}
                         </div>
                       </td>
                       <td>
@@ -652,11 +704,18 @@ export default function FlightSearchResults() {
                               ? 'flight-select-seat-btn active'
                               : 'flight-select-seat-btn'
                           }
-                          onClick={() => fetchSeats(f.id)}
+                          onClick={() => {
+                            if (isDeparturePast(f.departureTime)) return
+                            fetchSeats(f.id)
+                          }}
+                          disabled={isDeparturePast(f.departureTime)}
+                          title={isDeparturePast(f.departureTime) ? 'Kalkış gerçekleşti, rezervasyon kapalı.' : undefined}
                         >
-                          {selectedFlightId === f.id && selectedFlightSeats
-                            ? 'Koltukları Kapat'
-                            : 'Koltuk Seç'}
+                          {isDeparturePast(f.departureTime)
+                            ? 'Rezervasyon Kapalı'
+                            : selectedFlightId === f.id && selectedFlightSeats
+                              ? 'Koltukları Kapat'
+                              : 'Koltuk Seç'}
                         </button>
                       </td>
                     </tr>
@@ -700,6 +759,9 @@ export default function FlightSearchResults() {
                           <span className="datetime-secondary">
                             {new Date(f.departureTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
                           </span>
+                          {isDeparturePast(f.departureTime) && (
+                            <span className="flight-past-badge">Kalkış geçti</span>
+                          )}
                         </div>
                       </td>
                       <td>
@@ -716,9 +778,14 @@ export default function FlightSearchResults() {
                         <button
                           type="button"
                           className="flight-select-seat-btn"
-                          onClick={() => fetchSeats(f.id)}
+                          onClick={() => {
+                            if (isDeparturePast(f.departureTime)) return
+                            fetchSeats(f.id)
+                          }}
+                          disabled={isDeparturePast(f.departureTime)}
+                          title={isDeparturePast(f.departureTime) ? 'Kalkış gerçekleşti, rezervasyon kapalı.' : undefined}
                         >
-                          Koltuk Seç
+                          {isDeparturePast(f.departureTime) ? 'Rezervasyon Kapalı' : 'Koltuk Seç'}
                         </button>
                       </td>
                     </tr>
