@@ -1,6 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { AuthUser, AuthResponse, ApiErrorBody } from '../api/client'
-import { API_BASE, clearAuth, setAuth, getToken, getErrorMessageFromResponse, fetchProfile } from '../api/client'
+import {
+  API_BASE,
+  clearAuth,
+  setAuth,
+  getToken,
+  getErrorMessageFromResponse,
+  fetchProfile,
+  logoutRequest,
+} from '../api/client'
 
 const AUTH_USER_KEY = 'skysync_user'
 
@@ -27,7 +35,7 @@ type AuthContextValue = AuthState & {
     firstName: string,
     lastName: string
   ) => Promise<AuthResponse | RegisterSuccessResponse>
-  logout: () => void
+  logout: () => Promise<void>
   /** Şifremi unuttum: e-posta alır, başarılı/başarısız sonucunu döner */
   forgotPassword: (email: string) => Promise<{ message?: string }>
   /**
@@ -175,9 +183,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
-  const logout = useCallback(() => {
-    clearAuth()
-    setState({ token: null, user: null, isReady: true })
+  const logout = useCallback(async (): Promise<void> => {
+    try {
+      await logoutRequest()
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error('Oturum kapatma başarısız.')
+      throw err
+    } finally {
+      clearAuth()
+      setState({ token: null, user: null, isReady: true })
+    }
   }, [])
 
   const refreshProfile = useCallback(async () => {

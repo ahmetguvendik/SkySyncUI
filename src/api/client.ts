@@ -40,6 +40,26 @@ export function clearAuth(): void {
   localStorage.removeItem(USER_STORAGE_KEY)
 }
 
+/** Oturumu kapatır: POST auth/logout */
+export async function logoutRequest(): Promise<{ message?: string; code?: string }> {
+  const res = await fetchWithAuth('auth/logout', {
+    method: 'POST',
+  })
+  const text = await res.text()
+  let data: ApiErrorBody | null = null
+  if (text) {
+    try {
+      data = JSON.parse(text) as ApiErrorBody
+    } catch {
+      throw new Error('Çıkış yanıtı okunamadı.')
+    }
+  }
+  if (!res.ok) {
+    throw new Error(getErrorMessageFromResponse(data, 'Oturum kapatma başarısız.'))
+  }
+  return { message: data?.message, code: data?.code }
+}
+
 function buildUrl(path: string): string {
   const p = path.replace(/^\//, '')
   return `${API_BASE.replace(/\/$/, '')}/${p}`

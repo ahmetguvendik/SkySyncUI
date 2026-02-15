@@ -8,6 +8,16 @@ export default function MainLayout() {
   const path = location.pathname
   const isAdmin = user?.role === 'Admin'
 
+  const handleLogout = async () => {
+    try {
+      await logout()
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Çıkış işlemi tamamlanamadı.')
+    } finally {
+      navigate('/login')
+    }
+  }
+
   const isFlightSearch = path === '/ucus-ara' || path === '/ucus-sonuclari'
   const showQuickActions =
     path !== '/ucus-ara' &&
@@ -91,7 +101,7 @@ export default function MainLayout() {
             <button
               type="button"
               className="app-logout-btn"
-              onClick={() => { logout(); navigate('/login') }}
+              onClick={handleLogout}
             >
               Çıkış
             </button>
